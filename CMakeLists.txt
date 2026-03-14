@@ -26,8 +26,14 @@ endif()
 
 add_executable(doom_like
     src/main.cpp
+    src/core/game.cpp
+    src/entities/player.cpp
+    src/entities/target.cpp
+    src/render/renderer.cpp
+    src/world/world.cpp
 )
 
+target_include_directories(doom_like PRIVATE include)
 target_link_libraries(doom_like PRIVATE raylib)
 
 if(MSVC)
