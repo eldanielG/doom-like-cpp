@@ -32,7 +32,12 @@ void DrawMiniMap(const entities::Player& player, const std::array<entities::Targ
 void DrawHud(
     const entities::Player& player,
     const entities::WeaponState& weapon,
+    int score,
+    int bestScore,
     int hitCount,
     int destroyedCount,
-    int aliveCount);
+    int aliveCount,
+    float survivalTime,
+    float bestSurvivalTime,
+    bool isGameOver);
 } // namespace render

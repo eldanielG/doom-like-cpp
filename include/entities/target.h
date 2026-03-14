@@ -32,5 +32,6 @@ std::array<Target, kTargetCount> MakeTargets(const Player& player);
 void UpdateTarget(Target& target, float deltaTime);
 void HandleTargetRespawns(const Player& player, std::array<Target, kTargetCount>& targets, float deltaTime);
 bool TryHitTargets(const Player& player, std::array<Target, kTargetCount>& targets, int& hitCount, int& destroyedCount);
+bool TryDamagePlayerFromTargets(Player& player, const std::array<Target, kTargetCount>& targets);
 int CountAliveTargets(const std::array<Target, kTargetCount>& targets);
 } // namespace entities

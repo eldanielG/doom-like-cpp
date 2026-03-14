@@ -19,10 +19,12 @@ constexpr float kTargetRespawnDelay = 1.8f;
 constexpr float kTargetRespawnFlashRecovery = 3.6f;
 constexpr float kTargetAimAssist = 1.35f;
 constexpr float kMinimumTargetSpawnDistanceFromPlayer = 2.75f;
+constexpr float kTargetDamagePadding = 0.12f;
 constexpr float kTargetMoveSpeed = 0.9f;
 constexpr float kTargetPatrolDistance = 1.25f;
 constexpr float kTargetBaseSize = 0.8f;
 constexpr int kTargetStartHealth = 2;
+constexpr int kTargetContactDamage = 20;
 
 const std::array<Vector2, 4> kTargetPatrolOffsets = {{
     {kTargetPatrolDistance, 0.0f},
@@ -214,6 +216,41 @@ bool CanHitTarget(const entities::Player& player, const entities::Target& target
 
     return true;
 }
+
+bool CanDamagePlayer(const entities::Target& target, const entities::Player& player, float& distanceSquared)
+{
+    if (target.destroyed || player.health <= 0)
+    {
+        return false;
+    }
+
+    const Vector2 toPlayer = {
+        player.position.x - target.position.x,
+        player.position.y - target.position.y,
+    };
+    distanceSquared = LengthSquared(toPlayer);
+
+    if (distanceSquared <= 0.0001f)
+    {
+        return true;
+    }
+
+    const float playerDistance = std::sqrt(distanceSquared);
+    const float damageRange = world::kPlayerRadius + (target.size * 0.35f) + kTargetDamagePadding;
+
+    if (playerDistance > damageRange)
+    {
+        return false;
+    }
+
+    const Vector2 toPlayerDirection = {
+        toPlayer.x / playerDistance,
+        toPlayer.y / playerDistance,
+    };
+    const render::RayHit wallHit = render::CastRay(target.position, toPlayerDirection);
+
+    return wallHit.distance + world::kPlayerRadius >= playerDistance;
+}
 } // namespace
 
 namespace entities
@@ -367,6 +404,35 @@ bool TryHitTargets(const Player& player, std::array<Target, kTargetCount>& targe
     }
 
     return true;
+}
+
+bool TryDamagePlayerFromTargets(Player& player, const std::array<Target, kTargetCount>& targets)
+{
+    int closestTargetIndex = -1;
+    float closestDistanceSquared = std::numeric_limits<float>::max();
+
+    for (int index = 0; index < kTargetCount; ++index)
+    {
+        float distanceSquared = 0.0f;
+
+        if (!CanDamagePlayer(targets[index], player, distanceSquared))
+        {
+            continue;
+        }
+
+        if (distanceSquared < closestDistanceSquared)
+        {
+            closestDistanceSquared = distanceSquared;
+            closestTargetIndex = index;
+        }
+    }
+
+    if (closestTargetIndex < 0)
+    {
+        return false;
+    }
+
+    return ApplyDamage(player, kTargetContactDamage);
 }
 
 int CountAliveTargets(const std::array<Target, kTargetCount>& targets)

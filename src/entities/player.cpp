@@ -13,6 +13,8 @@ constexpr float kTurnSpeed = 2.35f;
 constexpr float kTurnSharpness = 18.0f;
 constexpr float kMaxDeltaTime = 1.0f / 30.0f;
 constexpr float kPlayerFov = 66.0f * (kPi / 180.0f);
+constexpr float kPlayerInvulnerabilityDuration = 0.7f;
+constexpr float kPlayerDamageFlashRecovery = 4.5f;
 constexpr float kWeaponCooldown = 0.18f;
 constexpr float kWeaponRecoilRecovery = 7.5f;
 constexpr float kWeaponFlashRecovery = 12.0f;
@@ -104,6 +106,9 @@ Player MakePlayer(Vector2 spawnPosition)
         0.0f,
         0.0f,
         kPlayerFov,
+        kPlayerMaxHealth,
+        0.0f,
+        0.0f,
     };
 }
 
@@ -120,6 +125,9 @@ WeaponState MakeWeaponState()
 void UpdatePlayer(Player& player, float deltaTime)
 {
     const float clampedDeltaTime = ClampDeltaTime(deltaTime);
+    player.invulnerabilityTimer = std::max(0.0f, player.invulnerabilityTimer - clampedDeltaTime);
+    player.damageFlash = std::max(0.0f, player.damageFlash - (kPlayerDamageFlashRecovery * clampedDeltaTime));
+
     float turnInput = 0.0f;
 
     if (IsKeyDown(KEY_LEFT))
@@ -202,6 +210,26 @@ bool TryFireWeapon(WeaponState& weapon)
     weapon.shotCooldown = kWeaponCooldown;
     weapon.recoil = 1.0f;
     weapon.muzzleFlash = 1.0f;
+    return true;
+}
+
+bool ApplyDamage(Player& player, int damage)
+{
+    if (damage <= 0 || player.health <= 0 || player.invulnerabilityTimer > 0.0f)
+    {
+        return false;
+    }
+
+    player.health = std::max(0, player.health - damage);
+    player.invulnerabilityTimer = kPlayerInvulnerabilityDuration;
+    player.damageFlash = 1.0f;
+
+    if (player.health == 0)
+    {
+        player.velocity = Vector2{0.0f, 0.0f};
+        player.turnVelocity = 0.0f;
+    }
+
     return true;
 }
 } // namespace entities

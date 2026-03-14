@@ -1,10 +1,17 @@
 #include "core/game.h"
 
+#include <algorithm>
+
 #include "render/renderer.h"
 #include "world/world.h"
 
 namespace core
 {
+namespace
+{
+constexpr int kScorePerElimination = 100;
+}
+
 GameState CreateGameState()
 {
     GameState game{};
@@ -23,8 +30,11 @@ void ResetGame(GameState& game)
     game.player = entities::MakePlayer(world::ChoosePlayerSpawnPoint());
     game.weapon = entities::MakeWeaponState();
     game.targets = entities::MakeTargets(game.player);
+    game.score = 0;
     game.hitCount = 0;
     game.destroyedCount = 0;
+    game.survivalTime = 0.0f;
+    game.isGameOver = false;
 }
 
 void UpdateGame(GameState& game, float deltaTime)
@@ -33,6 +43,14 @@ void UpdateGame(GameState& game, float deltaTime)
     {
         ResetGame(game);
     }
+
+    if (game.isGameOver)
+    {
+        return;
+    }
+
+    game.survivalTime += deltaTime;
+    game.bestSurvivalTime = std::max(game.bestSurvivalTime, game.survivalTime);
 
     entities::UpdatePlayer(game.player, deltaTime);
     entities::UpdateWeapon(game.weapon, deltaTime);
@@ -44,10 +62,23 @@ void UpdateGame(GameState& game, float deltaTime)
 
     entities::HandleTargetRespawns(game.player, game.targets, deltaTime);
 
+    const int destroyedBeforeShot = game.destroyedCount;
     if (entities::TryFireWeapon(game.weapon) &&
         entities::TryHitTargets(game.player, game.targets, game.hitCount, game.destroyedCount))
     {
         game.weapon.hitMarker = 1.0f;
+
+        const int eliminatedThisShot = game.destroyedCount - destroyedBeforeShot;
+        if (eliminatedThisShot > 0)
+        {
+            game.score += eliminatedThisShot * kScorePerElimination;
+            game.bestScore = std::max(game.bestScore, game.score);
+        }
+    }
+
+    if (entities::TryDamagePlayerFromTargets(game.player, game.targets) && game.player.health == 0)
+    {
+        game.isGameOver = true;
     }
 }
 
@@ -60,8 +91,13 @@ void DrawGame(GameState& game)
     render::DrawHud(
         game.player,
         game.weapon,
+        game.score,
+        game.bestScore,
         game.hitCount,
         game.destroyedCount,
-        entities::CountAliveTargets(game.targets));
+        entities::CountAliveTargets(game.targets),
+        game.survivalTime,
+        game.bestSurvivalTime,
+        game.isGameOver);
 }
 } // namespace core

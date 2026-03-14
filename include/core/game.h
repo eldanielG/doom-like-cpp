@@ -14,8 +14,13 @@ struct GameState
     entities::WeaponState weapon{};
     std::array<entities::Target, entities::kTargetCount> targets{};
     std::vector<float> depthBuffer;
+    int score = 0;
+    int bestScore = 0;
     int hitCount = 0;
     int destroyedCount = 0;
+    float survivalTime = 0.0f;
+    float bestSurvivalTime = 0.0f;
+    bool isGameOver = false;
 };
 
 GameState CreateGameState();

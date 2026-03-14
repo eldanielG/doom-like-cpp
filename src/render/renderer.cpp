@@ -68,6 +68,15 @@ Color LerpColor(Color from, Color to, float amount)
     };
 }
 
+void BreakTime(float timeSeconds, int& minutes, int& seconds, int& tenths)
+{
+    const float clampedTime = std::max(0.0f, timeSeconds);
+    const int totalSeconds = static_cast<int>(clampedTime);
+    minutes = totalSeconds / 60;
+    seconds = totalSeconds % 60;
+    tenths = static_cast<int>(clampedTime * 10.0f) % 10;
+}
+
 Color ShadeWall(Color baseColor, float distance, bool hitOnVerticalSide)
 {
     const float shadeFactor = std::clamp(
@@ -505,12 +514,17 @@ void DrawMiniMap(const entities::Player& player, const std::array<entities::Targ
 void DrawHud(
     const entities::Player& player,
     const entities::WeaponState& weapon,
+    int score,
+    int bestScore,
     int hitCount,
     int destroyedCount,
-    int aliveCount)
+    int aliveCount,
+    float survivalTime,
+    float bestSurvivalTime,
+    bool isGameOver)
 {
-    constexpr int kHudWidth = 220;
-    constexpr int kHudHeight = 108;
+    constexpr int kHudWidth = 248;
+    constexpr int kHudHeight = 178;
     constexpr int kHudPadding = 16;
 
     const int hudX = kScreenWidth - kHudWidth - kHudPadding;
@@ -519,14 +533,41 @@ void DrawHud(
     const Color borderColor = {100, 108, 120, 220};
     const Color primaryTextColor = {235, 231, 220, 255};
     const Color secondaryTextColor = {182, 190, 204, 255};
+    int currentMinutes = 0;
+    int currentSeconds = 0;
+    int currentTenths = 0;
+    int bestMinutes = 0;
+    int bestSeconds = 0;
+    int bestTenths = 0;
+
+    BreakTime(survivalTime, currentMinutes, currentSeconds, currentTenths);
+    BreakTime(bestSurvivalTime, bestMinutes, bestSeconds, bestTenths);
 
     DrawRectangle(hudX, hudY, kHudWidth, kHudHeight, panelColor);
     DrawRectangleLines(hudX, hudY, kHudWidth, kHudHeight, borderColor);
     DrawText(TextFormat("FPS %03i", GetFPS()), hudX + 12, hudY + 10, 20, primaryTextColor);
     DrawText(TextFormat("POS %.1f %.1f", player.position.x, player.position.y), hudX + 12, hudY + 34, 18, secondaryTextColor);
-    DrawText(TextFormat("HITS %02i", hitCount), hudX + 12, hudY + 56, 18, secondaryTextColor);
-    DrawText(TextFormat("ELIMS %02i | ALIVE %02i", destroyedCount, aliveCount), hudX + 12, hudY + 78, 18, secondaryTextColor);
-    DrawText("WASD move | arrows turn | mouse1/space fire | R reset", 16, kScreenHeight - 28, 18, Color{220, 220, 220, 190});
+
+    const float healthRatio = std::clamp(static_cast<float>(player.health) / static_cast<float>(entities::kPlayerMaxHealth), 0.0f, 1.0f);
+    const Color healthColor = LerpColor(Color{196, 62, 62, 255}, Color{114, 214, 132, 255}, healthRatio);
+    DrawText(TextFormat("HP %03i / %03i", player.health, entities::kPlayerMaxHealth), hudX + 12, hudY + 56, 18, primaryTextColor);
+    DrawRectangle(hudX + 12, hudY + 80, kHudWidth - 24, 10, Color{34, 18, 20, 255});
+    DrawRectangle(hudX + 13, hudY + 81, static_cast<int>(static_cast<float>(kHudWidth - 26) * healthRatio), 8, healthColor);
+    DrawText(TextFormat("SCORE %04i | BEST %04i", score, bestScore), hudX + 12, hudY + 96, 18, secondaryTextColor);
+    DrawText(TextFormat("TIME %02i:%02i.%01i", currentMinutes, currentSeconds, currentTenths), hudX + 12, hudY + 116, 18, secondaryTextColor);
+    DrawText(TextFormat("BEST %02i:%02i.%01i", bestMinutes, bestSeconds, bestTenths), hudX + 12, hudY + 136, 18, secondaryTextColor);
+    DrawText(TextFormat("HITS %02i | ELIMS %02i | ALIVE %02i", hitCount, destroyedCount, aliveCount), hudX + 12, hudY + 156, 18, secondaryTextColor);
+
+    if (player.damageFlash > 0.0f)
+    {
+        const Color damageOverlay = {120, 18, 18, static_cast<unsigned char>(70.0f * player.damageFlash)};
+        DrawRectangle(0, 0, kScreenWidth, kScreenHeight, damageOverlay);
+    }
+
+    const char* controlsText = isGameOver ?
+        "Game over | R restart" :
+        "WASD move | arrows turn | mouse1/space fire | R reset";
+    DrawText(controlsText, 16, kScreenHeight - 28, 18, Color{220, 220, 220, 190});
 
     const int crosshairX = kScreenWidth / 2;
     const int crosshairY = kScreenHeight / 2;
@@ -543,6 +584,27 @@ void DrawHud(
         DrawLine(crosshairX + markerSpread, crosshairY - markerSpread, crosshairX + 6, crosshairY - 6, crosshairColor);
         DrawLine(crosshairX - markerSpread, crosshairY + markerSpread, crosshairX - 6, crosshairY + 6, crosshairColor);
         DrawLine(crosshairX + markerSpread, crosshairY + markerSpread, crosshairX + 6, crosshairY + 6, crosshairColor);
+    }
+
+    if (isGameOver)
+    {
+        constexpr int kGameOverWidth = 390;
+        constexpr int kGameOverHeight = 158;
+        const int boxX = (kScreenWidth - kGameOverWidth) / 2;
+        const int boxY = (kScreenHeight - kGameOverHeight) / 2;
+
+        DrawRectangle(boxX, boxY, kGameOverWidth, kGameOverHeight, Color{12, 8, 10, 220});
+        DrawRectangleLines(boxX, boxY, kGameOverWidth, kGameOverHeight, Color{160, 88, 88, 230});
+        DrawText("GAME OVER", boxX + 96, boxY + 18, 34, Color{240, 220, 220, 255});
+        DrawText(TextFormat("Score %04i | Best %04i", score, bestScore), boxX + 46, boxY + 66, 22, Color{220, 214, 206, 255});
+        DrawText(TextFormat("Time %02i:%02i.%01i | Best %02i:%02i.%01i",
+            currentMinutes,
+            currentSeconds,
+            currentTenths,
+            bestMinutes,
+            bestSeconds,
+            bestTenths), boxX + 24, boxY + 96, 22, Color{220, 214, 206, 255});
+        DrawText("Pressione R para reiniciar", boxX + 50, boxY + 126, 22, Color{220, 214, 206, 255});
     }
 }
 } // namespace render

@@ -5,6 +5,7 @@
 namespace entities
 {
 constexpr float kMoveSpeed = 3.4f;
+constexpr int kPlayerMaxHealth = 100;
 
 struct Player
 {
@@ -13,6 +14,9 @@ struct Player
     float angle;
     float turnVelocity;
     float fov;
+    int health;
+    float invulnerabilityTimer;
+    float damageFlash;
 };
 
 struct WeaponState
@@ -28,4 +32,5 @@ WeaponState MakeWeaponState();
 void UpdatePlayer(Player& player, float deltaTime);
 void UpdateWeapon(WeaponState& weapon, float deltaTime);
 bool TryFireWeapon(WeaponState& weapon);
+bool ApplyDamage(Player& player, int damage);
 } // namespace entities
