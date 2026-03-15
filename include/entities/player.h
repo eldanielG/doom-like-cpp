@@ -23,6 +23,7 @@ struct WeaponState
     float shotCooldown;
     float muzzleFlash;
     float hitMarker;
+    float rapidFireTimer;
 };
 
 Player MakePlayer(Vector2 spawnPosition);

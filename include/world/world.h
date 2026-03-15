@@ -5,6 +5,7 @@
 
 namespace entities
 {
+enum class PickupType : unsigned char;
 enum class TargetType : unsigned char;
 }
 
@@ -18,6 +19,7 @@ constexpr int kMapHeight = 12;
 constexpr float kPlayerRadius = core::tuning::kPlayer.collisionRadius;
 constexpr int kPlayerSpawnPointCount = 6;
 constexpr int kTargetSpawnPointCount = 10;
+constexpr int kPickupSpawnPointCount = 5;
 
 using TileRow = std::array<int, kMapWidth>;
 using Map = std::array<TileRow, kMapHeight>;
@@ -28,9 +30,16 @@ struct TargetSpawnPoint
     entities::TargetType type;
 };
 
+struct PickupSpawnPoint
+{
+    Vector2 position;
+    entities::PickupType type;
+};
+
 const Map& GetMap();
 const std::array<Vector2, kPlayerSpawnPointCount>& GetPlayerSpawnPoints();
 const std::array<TargetSpawnPoint, kTargetSpawnPointCount>& GetTargetSpawnPoints();
+const std::array<PickupSpawnPoint, kPickupSpawnPointCount>& GetPickupSpawnPoints();
 
 bool IsWall(int mapX, int mapY);
 bool CanMoveTo(Vector2 position);

@@ -28,6 +28,7 @@ add_executable(doom_like
     src/main.cpp
     src/core/audio.cpp
     src/core/game.cpp
+    src/entities/pickup.cpp
     src/entities/player.cpp
     src/entities/target.cpp
     src/render/renderer.cpp

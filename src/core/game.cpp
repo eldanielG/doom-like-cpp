@@ -117,6 +117,7 @@ void ResetGame(GameState& game)
         game.depthBuffer.assign(render::kScreenWidth, 0.0f);
     }
 
+    game.pickups = entities::MakePickups();
     game.player = entities::MakePlayer(world::ChoosePlayerSpawnPoint());
     game.weapon = entities::MakeWeaponState();
     game.targets = entities::MakeTargets(game.player);
@@ -125,6 +126,8 @@ void ResetGame(GameState& game)
     game.hitCount = 0;
     game.destroyedCount = 0;
     game.survivalTime = 0.0f;
+    game.pickupMessage = nullptr;
+    game.pickupMessageTimer = 0.0f;
     game.pauseMode = PauseMode::Quick;
     game.pauseMenuSelection = PauseOptionResume;
     game.phase = GamePhase::Gameplay;
@@ -216,10 +219,16 @@ void UpdateGame(GameState& game, float deltaTime)
     game.survivalTime += deltaTime;
     game.bestSurvivalTime = std::max(game.bestSurvivalTime, game.survivalTime);
     game.difficultyLevel = tuning::CalculateDifficultyLevel(game.survivalTime);
+    game.pickupMessageTimer = std::max(0.0f, game.pickupMessageTimer - deltaTime);
+    if (game.pickupMessageTimer <= 0.0f)
+    {
+        game.pickupMessage = nullptr;
+    }
 
     const int playerHealthBeforeDamage = game.player.health;
     entities::UpdatePlayer(game.player, deltaTime);
     entities::UpdateWeapon(game.weapon, deltaTime);
+    entities::UpdatePickups(game.pickups, deltaTime);
 
     for (entities::Target& target : game.targets)
     {
@@ -257,6 +266,20 @@ void UpdateGame(GameState& game, float deltaTime)
 
     entities::TryDamagePlayerFromTargets(game.player, game.targets);
 
+    const entities::PickupCollectionResult pickupResult = entities::TryCollectPickups(game.player, game.weapon, game.pickups);
+    if (pickupResult.collected)
+    {
+        entities::AddScreenShake(game.player, 0.16f);
+        if (pickupResult.scoreDelta > 0)
+        {
+            game.score += pickupResult.scoreDelta;
+            game.bestScore = std::max(game.bestScore, game.score);
+        }
+
+        game.pickupMessage = entities::GetPickupLabel(pickupResult.type);
+        game.pickupMessageTimer = tuning::kPickup.feedbackDuration;
+    }
+
     if (game.player.health < playerHealthBeforeDamage)
     {
         PlayPlayerHurtSound(game.audio);
@@ -275,10 +298,11 @@ void DrawGame(GameState& game)
     BeginMode2D(gameplayCamera);
     render::DrawWorld(game.player, game.depthBuffer);
     render::DrawTargets(game.player, game.targets, game.depthBuffer);
+    render::DrawPickups(game.player, game.pickups, game.depthBuffer);
     if (game.phase != GamePhase::Title)
     {
         render::DrawWeapon(game.player, game.weapon);
-        render::DrawMiniMap(game.player, game.targets);
+        render::DrawMiniMap(game.player, game.targets, game.pickups);
         render::DrawHud(
             game.player,
             game.weapon,
@@ -290,6 +314,8 @@ void DrawGame(GameState& game)
             entities::CountAliveTargets(game.targets),
             game.survivalTime,
             game.bestSurvivalTime,
+            game.pickupMessage,
+            game.pickupMessageTimer,
             game.phase == GamePhase::GameOver);
     }
     EndMode2D();

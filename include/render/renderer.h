@@ -3,6 +3,7 @@
 #include <array>
 #include <vector>
 
+#include "entities/pickup.h"
 #include "entities/player.h"
 #include "entities/target.h"
 #include "raylib.h"
@@ -33,8 +34,15 @@ void DrawTargets(
     const entities::Player& player,
     const std::array<entities::Target, entities::kTargetCount>& targets,
     const std::vector<float>& depthBuffer);
+void DrawPickups(
+    const entities::Player& player,
+    const std::array<entities::Pickup, entities::kPickupCount>& pickups,
+    const std::vector<float>& depthBuffer);
 void DrawWeapon(const entities::Player& player, const entities::WeaponState& weapon);
-void DrawMiniMap(const entities::Player& player, const std::array<entities::Target, entities::kTargetCount>& targets);
+void DrawMiniMap(
+    const entities::Player& player,
+    const std::array<entities::Target, entities::kTargetCount>& targets,
+    const std::array<entities::Pickup, entities::kPickupCount>& pickups);
 void DrawHud(
     const entities::Player& player,
     const entities::WeaponState& weapon,
@@ -46,6 +54,8 @@ void DrawHud(
     int aliveCount,
     float survivalTime,
     float bestSurvivalTime,
+    const char* pickupMessage,
+    float pickupMessageTimer,
     bool isGameOver);
 void DrawTitleOverlay();
 void DrawPauseOverlay(core::PauseMode pauseMode, int selectedOption);

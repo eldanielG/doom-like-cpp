@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file.
 ### Improved
 - Refined combat feel with firing and damage screen shake, stronger kill feedback, a clearer hit pulse, and tuned weapon recoil and muzzle flash presentation.
 - Split pause behavior into a quick `P` pause toggle and a real `Esc` pause menu with resume, restart, title, and quit actions.
+- Added lightweight pickups for health, rapid fire, and score bonuses, with simple world spawns, collection feedback, and HUD visibility for active rapid fire.
 
 ## [v0.1.0] - 2026-03-15
 

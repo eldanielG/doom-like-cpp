@@ -61,6 +61,13 @@ struct TargetVisualStyle
     float projectileScale;
 };
 
+struct PickupVisualStyle
+{
+    Color primaryColor;
+    Color secondaryColor;
+    Color glowColor;
+};
+
 Color ScaleColor(Color color, float brightness)
 {
     const float clampedBrightness = std::clamp(brightness, 0.0f, 1.0f);
@@ -116,6 +123,32 @@ TargetVisualStyle GetTargetVisualStyle(entities::TargetType type)
             Color{255, 188, 96, 220},
             Color{255, 244, 206, 255},
             1.0f,
+        };
+    }
+}
+
+PickupVisualStyle GetPickupVisualStyle(entities::PickupType type)
+{
+    switch (type)
+    {
+    case entities::PickupType::HealthPack:
+        return PickupVisualStyle{
+            Color{96, 206, 126, 255},
+            Color{232, 246, 236, 255},
+            Color{110, 228, 146, 120},
+        };
+    case entities::PickupType::RapidFire:
+        return PickupVisualStyle{
+            Color{98, 196, 255, 255},
+            Color{238, 248, 255, 255},
+            Color{118, 208, 255, 120},
+        };
+    case entities::PickupType::ScoreBonus:
+    default:
+        return PickupVisualStyle{
+            Color{240, 192, 82, 255},
+            Color{255, 248, 210, 255},
+            Color{255, 214, 108, 120},
         };
     }
 }
@@ -360,6 +393,96 @@ void DrawProjectile(
     DrawCircle(screenX, screenY, projectileSize, style.projectileColor);
     DrawCircle(screenX, screenY, projectileSize * 0.45f, style.projectileCoreColor);
 }
+
+void DrawPickup(
+    const entities::Player& player,
+    const entities::Pickup& pickup,
+    const std::vector<float>& depthBuffer)
+{
+    if (!pickup.active)
+    {
+        return;
+    }
+
+    const Vector2 toPickup = {
+        pickup.position.x - player.position.x,
+        pickup.position.y - player.position.y,
+    };
+    const float distanceSquared = LengthSquared(toPickup);
+
+    if (distanceSquared <= 0.0001f)
+    {
+        return;
+    }
+
+    const float pickupDistance = std::sqrt(distanceSquared);
+    const float angleDifference = NormalizeRelativeAngle(std::atan2(toPickup.y, toPickup.x) - player.angle);
+    const float halfFov = player.fov * 0.5f;
+
+    if (std::fabs(angleDifference) > (halfFov + 0.2f))
+    {
+        return;
+    }
+
+    const float perpendicularDistance = pickupDistance * std::cos(angleDifference);
+    if (perpendicularDistance <= 0.05f)
+    {
+        return;
+    }
+
+    const float screenOffset = std::tan(angleDifference) / std::tan(halfFov);
+    const int screenX = static_cast<int>(((screenOffset + 1.0f) * 0.5f) * static_cast<float>(render::kScreenWidth));
+
+    if (screenX < 0 || screenX >= render::kScreenWidth || perpendicularDistance >= depthBuffer[screenX])
+    {
+        return;
+    }
+
+    const PickupVisualStyle style = GetPickupVisualStyle(pickup.type);
+    const float bob = std::sin((pickup.bobPhase * 2.4f) + (pickup.position.x * 0.7f)) * 7.0f;
+    const float baseSize = std::clamp((static_cast<float>(render::kScreenHeight) * 0.18f) / perpendicularDistance, 10.0f, 54.0f);
+    const int centerY = (render::kScreenHeight / 2) + static_cast<int>(12.0f + bob);
+    const float innerSize = baseSize * 0.55f;
+
+    switch (pickup.type)
+    {
+    case entities::PickupType::HealthPack:
+        DrawCircle(screenX, centerY, baseSize * 0.72f, style.glowColor);
+        DrawRectangle(screenX - static_cast<int>(baseSize * 0.55f), centerY - static_cast<int>(baseSize * 0.55f), static_cast<int>(baseSize * 1.1f), static_cast<int>(baseSize * 1.1f), style.primaryColor);
+        DrawRectangle(screenX - static_cast<int>(innerSize * 0.24f), centerY - static_cast<int>(innerSize * 0.82f), static_cast<int>(innerSize * 0.48f), static_cast<int>(innerSize * 1.64f), style.secondaryColor);
+        DrawRectangle(screenX - static_cast<int>(innerSize * 0.82f), centerY - static_cast<int>(innerSize * 0.24f), static_cast<int>(innerSize * 1.64f), static_cast<int>(innerSize * 0.48f), style.secondaryColor);
+        break;
+    case entities::PickupType::RapidFire:
+        DrawCircle(screenX, centerY, baseSize * 0.78f, style.glowColor);
+        DrawCircle(screenX, centerY, baseSize * 0.56f, style.primaryColor);
+        DrawTriangle(
+            Vector2{static_cast<float>(screenX - (baseSize * 0.16f)), static_cast<float>(centerY - (baseSize * 0.72f))},
+            Vector2{static_cast<float>(screenX + (baseSize * 0.06f)), static_cast<float>(centerY - (baseSize * 0.1f))},
+            Vector2{static_cast<float>(screenX - (baseSize * 0.24f)), static_cast<float>(centerY - (baseSize * 0.1f))},
+            style.secondaryColor);
+        DrawTriangle(
+            Vector2{static_cast<float>(screenX - (baseSize * 0.04f)), static_cast<float>(centerY - (baseSize * 0.1f))},
+            Vector2{static_cast<float>(screenX + (baseSize * 0.24f)), static_cast<float>(centerY + (baseSize * 0.72f))},
+            Vector2{static_cast<float>(screenX + (baseSize * 0.02f)), static_cast<float>(centerY + (baseSize * 0.04f))},
+            style.secondaryColor);
+        break;
+    case entities::PickupType::ScoreBonus:
+    default:
+        DrawCircle(screenX, centerY, baseSize * 0.82f, style.glowColor);
+        DrawTriangle(
+            Vector2{static_cast<float>(screenX), static_cast<float>(centerY - baseSize)},
+            Vector2{static_cast<float>(screenX + baseSize * 0.72f), static_cast<float>(centerY)},
+            Vector2{static_cast<float>(screenX), static_cast<float>(centerY + baseSize)},
+            style.primaryColor);
+        DrawTriangle(
+            Vector2{static_cast<float>(screenX), static_cast<float>(centerY - baseSize)},
+            Vector2{static_cast<float>(screenX - baseSize * 0.72f), static_cast<float>(centerY)},
+            Vector2{static_cast<float>(screenX), static_cast<float>(centerY + baseSize)},
+            style.secondaryColor);
+        DrawCircle(screenX, centerY, baseSize * 0.18f, Color{255, 248, 222, 220});
+        break;
+    }
+}
 } // namespace
 
 namespace render
@@ -583,6 +706,37 @@ void DrawTargets(
     }
 }
 
+void DrawPickups(
+    const entities::Player& player,
+    const std::array<entities::Pickup, entities::kPickupCount>& pickups,
+    const std::vector<float>& depthBuffer)
+{
+    std::array<int, entities::kPickupCount> pickupOrder{};
+
+    for (int index = 0; index < entities::kPickupCount; ++index)
+    {
+        pickupOrder[index] = index;
+    }
+
+    std::sort(pickupOrder.begin(), pickupOrder.end(), [&player, &pickups](int left, int right) {
+        const Vector2 toLeft = {
+            pickups[left].position.x - player.position.x,
+            pickups[left].position.y - player.position.y,
+        };
+        const Vector2 toRight = {
+            pickups[right].position.x - player.position.x,
+            pickups[right].position.y - player.position.y,
+        };
+
+        return LengthSquared(toLeft) > LengthSquared(toRight);
+    });
+
+    for (int index : pickupOrder)
+    {
+        DrawPickup(player, pickups[index], depthBuffer);
+    }
+}
+
 void DrawWeapon(const entities::Player& player, const entities::WeaponState& weapon)
 {
     const float speedRatio = std::clamp(
@@ -639,7 +793,10 @@ void DrawWeapon(const entities::Player& player, const entities::WeaponState& wea
     }
 }
 
-void DrawMiniMap(const entities::Player& player, const std::array<entities::Target, entities::kTargetCount>& targets)
+void DrawMiniMap(
+    const entities::Player& player,
+    const std::array<entities::Target, entities::kTargetCount>& targets,
+    const std::array<entities::Pickup, entities::kPickupCount>& pickups)
 {
     constexpr int kMiniMapScale = 18;
     constexpr int kMiniMapPadding = 16;
@@ -685,6 +842,20 @@ void DrawMiniMap(const entities::Player& player, const std::array<entities::Targ
         DrawCircle(targetX, targetY, 5.0f, targetColor);
     }
 
+    for (const entities::Pickup& pickup : pickups)
+    {
+        if (!pickup.active)
+        {
+            continue;
+        }
+
+        const PickupVisualStyle style = GetPickupVisualStyle(pickup.type);
+        const int pickupX = kMiniMapPadding + static_cast<int>(pickup.position.x * static_cast<float>(kMiniMapScale));
+        const int pickupY = kMiniMapPadding + static_cast<int>(pickup.position.y * static_cast<float>(kMiniMapScale));
+        DrawRectangle(pickupX - 3, pickupY - 3, 6, 6, style.primaryColor);
+        DrawRectangleLines(pickupX - 3, pickupY - 3, 6, 6, style.secondaryColor);
+    }
+
     DrawCircle(playerX, playerY, 4.0f, RED);
     DrawLine(playerX, playerY, lookX, lookY, RED);
 }
@@ -700,10 +871,12 @@ void DrawHud(
     int aliveCount,
     float survivalTime,
     float bestSurvivalTime,
+    const char* pickupMessage,
+    float pickupMessageTimer,
     bool isGameOver)
 {
     constexpr int kHudWidth = 248;
-    constexpr int kHudHeight = 200;
+    constexpr int kHudHeight = 224;
     constexpr int kHudPadding = 16;
 
     const int hudX = kScreenWidth - kHudWidth - kHudPadding;
@@ -740,6 +913,10 @@ void DrawHud(
     DrawText(TextFormat("BEST %02i:%02i.%01i", bestMinutes, bestSeconds, bestTenths), hudX + 12, hudY + 136, 18, secondaryTextColor);
     DrawText(TextFormat("INTENSITY LVL %02i", difficultyLevel), hudX + 12, hudY + 156, 18, secondaryTextColor);
     DrawText(TextFormat("HITS %02i | ELIMS %02i | ALIVE %02i", hitCount, destroyedCount, aliveCount), hudX + 12, hudY + 176, 18, secondaryTextColor);
+    if (weapon.rapidFireTimer > 0.0f)
+    {
+        DrawText(TextFormat("RAPID FIRE %.1fs", weapon.rapidFireTimer), hudX + 12, hudY + 196, 18, Color{116, 214, 255, 255});
+    }
 
     if (player.damageFlash > 0.0f)
     {
@@ -794,6 +971,16 @@ void DrawHud(
             bestSeconds,
             bestTenths), boxX + 24, boxY + 96, 22, Color{220, 214, 206, 255});
         DrawText("Press R, Enter or Space | Esc title", boxX + 20, boxY + 126, 22, Color{220, 214, 206, 255});
+    }
+
+    if (pickupMessage != nullptr && pickupMessageTimer > 0.0f)
+    {
+        const float pulse = Clamp01(pickupMessageTimer / core::tuning::kPickup.feedbackDuration);
+        const int messageWidth = MeasureText(pickupMessage, 26);
+        const int messageX = (kScreenWidth - messageWidth) / 2;
+        const int messageY = kScreenHeight - 74;
+        DrawRectangle(messageX - 18, messageY - 8, messageWidth + 36, 40, Color{10, 12, 18, static_cast<unsigned char>(150.0f * pulse)});
+        DrawText(pickupMessage, messageX, messageY, 26, Color{255, 224, 168, static_cast<unsigned char>(255.0f * pulse)});
     }
 }
 

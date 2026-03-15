@@ -91,6 +91,17 @@ struct ScoringTuning
     int scorePerElimination;
 };
 
+struct PickupTuning
+{
+    float collectRadius;
+    float respawnDelay;
+    int healthRestore;
+    float rapidFireDuration;
+    float rapidFireCooldownMultiplier;
+    int scoreBonus;
+    float feedbackDuration;
+};
+
 inline constexpr float kPi = 3.1415926535f;
 
 inline constexpr PlayerTuning kPlayer{
@@ -151,6 +162,16 @@ inline constexpr DifficultyScalingTuning kDifficulty{
 
 inline constexpr ScoringTuning kScoring{
     100,
+};
+
+inline constexpr PickupTuning kPickup{
+    0.24f,
+    14.0f,
+    30,
+    6.5f,
+    0.55f,
+    150,
+    2.0f,
 };
 
 constexpr EnemyVariantTuning GetEnemyVariantTuning(entities::TargetType type)

@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/audio.h"
+#include "entities/pickup.h"
 #include "entities/player.h"
 #include "entities/target.h"
 
@@ -26,6 +27,7 @@ enum class PauseMode : unsigned char
 struct GameState
 {
     AudioState audio{};
+    std::array<entities::Pickup, entities::kPickupCount> pickups{};
     entities::Player player{};
     entities::WeaponState weapon{};
     std::array<entities::Target, entities::kTargetCount> targets{};
@@ -40,6 +42,8 @@ struct GameState
     int destroyedCount = 0;
     float survivalTime = 0.0f;
     float bestSurvivalTime = 0.0f;
+    const char* pickupMessage = nullptr;
+    float pickupMessageTimer = 0.0f;
     bool shouldQuit = false;
 };
 

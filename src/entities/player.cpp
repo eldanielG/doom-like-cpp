@@ -110,6 +110,7 @@ WeaponState MakeWeaponState()
         0.0f,
         0.0f,
         0.0f,
+        0.0f,
     };
 }
 
@@ -196,6 +197,7 @@ void UpdateWeapon(WeaponState& weapon, float deltaTime)
     weapon.recoil = std::max(0.0f, weapon.recoil - (core::tuning::kWeapon.recoilRecovery * clampedDeltaTime));
     weapon.muzzleFlash = std::max(0.0f, weapon.muzzleFlash - (core::tuning::kWeapon.muzzleFlashRecovery * clampedDeltaTime));
     weapon.hitMarker = std::max(0.0f, weapon.hitMarker - (core::tuning::kWeapon.hitMarkerRecovery * clampedDeltaTime));
+    weapon.rapidFireTimer = std::max(0.0f, weapon.rapidFireTimer - clampedDeltaTime);
 }
 
 bool TryFireWeapon(WeaponState& weapon)
@@ -207,7 +209,10 @@ bool TryFireWeapon(WeaponState& weapon)
         return false;
     }
 
-    weapon.shotCooldown = core::tuning::kWeapon.cooldown;
+    const float cooldown = (weapon.rapidFireTimer > 0.0f) ?
+        (core::tuning::kWeapon.cooldown * core::tuning::kPickup.rapidFireCooldownMultiplier) :
+        core::tuning::kWeapon.cooldown;
+    weapon.shotCooldown = cooldown;
     weapon.recoil = core::tuning::kWeapon.fireRecoil;
     weapon.muzzleFlash = core::tuning::kWeapon.fireMuzzleFlash;
     return true;

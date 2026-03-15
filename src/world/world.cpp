@@ -5,6 +5,7 @@
 #include <fstream>
 #include <string>
 
+#include "entities/pickup.h"
 #include "entities/target.h"
 
 namespace
@@ -29,6 +30,14 @@ const std::array<world::TargetSpawnPoint, world::kTargetSpawnPointCount> kTarget
     {{5.5f, 7.5f}, entities::TargetType::Tank},
     {{1.5f, 9.5f}, entities::TargetType::Scout},
     {{9.5f, 9.5f}, entities::TargetType::Standard},
+}};
+
+const std::array<world::PickupSpawnPoint, world::kPickupSpawnPointCount> kPickupSpawnPoints = {{
+    {{3.5f, 1.5f}, entities::PickupType::HealthPack},
+    {{7.5f, 1.5f}, entities::PickupType::RapidFire},
+    {{5.5f, 5.5f}, entities::PickupType::ScoreBonus},
+    {{3.5f, 9.5f}, entities::PickupType::HealthPack},
+    {{7.5f, 9.5f}, entities::PickupType::RapidFire},
 }};
 
 constexpr std::array<const char*, 3> kMapFilePaths = {{
@@ -150,6 +159,11 @@ const std::array<Vector2, kPlayerSpawnPointCount>& GetPlayerSpawnPoints()
 const std::array<TargetSpawnPoint, kTargetSpawnPointCount>& GetTargetSpawnPoints()
 {
     return kTargetSpawnPoints;
+}
+
+const std::array<PickupSpawnPoint, kPickupSpawnPointCount>& GetPickupSpawnPoints()
+{
+    return kPickupSpawnPoints;
 }
 
 bool IsWall(int mapX, int mapY)
