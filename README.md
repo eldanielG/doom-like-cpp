@@ -1,37 +1,90 @@
 # doom-like-cpp
 
-Prototipo inicial de FPS retro em C++ com raylib, CMake e raycasting basico.
+**A modular retro FPS prototype built with C++17, raylib, and CMake.**
 
-## O que ja tem
+`doom-like-cpp` is a focused first-person shooter prototype inspired by classic
+90s FPS design, built around raycasting, fast iteration, and controlled scope.
+The goal is to explore gameplay feel, combat systems, and clean technical
+structure without prematurely expanding into a full engine or a full DOOM clone.
 
-- janela do jogo
-- mapa 2D em matriz
-- player com posicao, angulo e campo de visao
-- movimentacao por teclado
-- paredes em pseudo-3D com raycasting
-- minimapa simples para depuracao
+> Current status: **first playable combat build**
 
-## Controles
+## Features
 
-- `W`, `A`, `S`, `D`: mover
-- `Left`, `Right`: girar
-- `Esc`: fechar
+- Raycasting-based pseudo-3D rendering with wall shading and a retro visual style
+- Player movement, collision, shooting, health, damage feedback, and game over flow
+- Enemy behavior with patrol, chase, line-of-sight checks, and short-term pursuit memory
+- Simple ranged enemy attacks with readable projectile feedback
+- Score, best score, survival time, and best time tracking during the session
+- Progressive difficulty scaling based on survival time
+- Integrated gameplay audio for shooting, hits, player damage, and game over
+- Modular architecture split into `core`, `entities`, `render`, and `world`
+- HUD, crosshair, minimap, and a lightweight first-person weapon presentation
 
-## Build
+## Tech Stack
 
-Se `raylib` ja estiver instalada no sistema, o CMake tenta usa-la primeiro.
-Se nao estiver, o projeto faz download automatico da biblioteca via `FetchContent`.
+- `C++17`
+- `raylib`
+- `CMake`
+- Custom raycasting renderer
+- No full game engine
+
+## Controls
+
+| Action | Input |
+| --- | --- |
+| Move | `W`, `A`, `S`, `D` |
+| Turn camera | `Left Arrow`, `Right Arrow` |
+| Fire | `Mouse Left`, `Space` |
+| Reset run | `R` |
+| Quit | `Esc` / window close |
+
+## Build and Run
+
+If `raylib` is available on your system, CMake will use it. Otherwise, the
+project fetches `raylib` automatically during configuration.
 
 ```powershell
 cmake -S . -B build
 cmake --build build
 ```
 
-Executavel gerado:
+Run the generated `doom_like` executable from your build output directory.
+On Visual Studio generators, this is typically something like:
 
-- `build/doom_like`
+```powershell
+.\build\Debug\doom_like.exe
+```
 
-## Documentacao
+## Project Structure
 
-- Creditos de audio e status de assets: [CREDITS.md](./CREDITS.md)
-- Historico de versoes e release notes: [CHANGELOG.md](./CHANGELOG.md)
+```text
+doom-like-cpp/
+|-- include/
+|   |-- core/       # game state, flow, audio
+|   |-- entities/   # player and enemy logic
+|   |-- render/     # raycasting, HUD, minimap, weapon, sprites
+|   `-- world/      # map, collision, spawn points
+|-- src/
+|   |-- core/
+|   |-- entities/
+|   |-- render/
+|   |-- world/
+|   `-- main.cpp    # bootstrap and main loop
+|-- assets/
+`-- CMakeLists.txt
+```
+
+## Roadmap
+
+Short-term next steps are centered on improving gameplay depth without losing
+the project's lightweight structure:
+
+- combat feel and encounter polish
+- richer visual presentation
+- more iteration on arena flow and challenge pacing
+
+## Project Docs
+
+- Version history and release notes: [CHANGELOG.md](./CHANGELOG.md)
+- Audio attribution and asset notes: [CREDITS.md](./CREDITS.md)
