@@ -234,6 +234,63 @@ void DrawTarget(
         const Color respawnRingColor = {170, 224, 255, static_cast<unsigned char>(170.0f * target.respawnFlash)};
         DrawCircleLines(screenX, liftedCenterY, outerRadius * (1.18f + ((1.0f - target.respawnFlash) * 0.2f)), respawnRingColor);
     }
+
+    if (target.attackFlash > 0.0f)
+    {
+        const Color attackRingColor = {255, 192, 118, static_cast<unsigned char>(170.0f * target.attackFlash)};
+        DrawCircleLines(screenX, liftedCenterY, outerRadius * (1.22f + ((1.0f - target.attackFlash) * 0.08f)), attackRingColor);
+    }
+}
+
+void DrawProjectile(
+    const entities::Player& player,
+    const entities::Target& target,
+    const std::vector<float>& depthBuffer)
+{
+    if (!target.projectileActive)
+    {
+        return;
+    }
+
+    const Vector2 toProjectile = {
+        target.projectilePosition.x - player.position.x,
+        target.projectilePosition.y - player.position.y,
+    };
+    const float distanceSquared = LengthSquared(toProjectile);
+
+    if (distanceSquared <= 0.0001f)
+    {
+        return;
+    }
+
+    const float projectileDistance = std::sqrt(distanceSquared);
+    const float angleDifference = NormalizeRelativeAngle(std::atan2(toProjectile.y, toProjectile.x) - player.angle);
+    const float halfFov = player.fov * 0.5f;
+
+    if (std::fabs(angleDifference) > (halfFov + 0.2f))
+    {
+        return;
+    }
+
+    const float perpendicularDistance = projectileDistance * std::cos(angleDifference);
+
+    if (perpendicularDistance <= 0.05f)
+    {
+        return;
+    }
+
+    const float screenOffset = std::tan(angleDifference) / std::tan(halfFov);
+    const int screenX = static_cast<int>(((screenOffset + 1.0f) * 0.5f) * static_cast<float>(render::kScreenWidth));
+
+    if (screenX < 0 || screenX >= render::kScreenWidth || perpendicularDistance >= depthBuffer[screenX])
+    {
+        return;
+    }
+
+    const int screenY = render::kScreenHeight / 2;
+    const float projectileSize = std::clamp((static_cast<float>(render::kScreenHeight) * 0.12f) / perpendicularDistance, 5.0f, 18.0f);
+    DrawCircle(screenX, screenY, projectileSize, Color{255, 188, 96, 220});
+    DrawCircle(screenX, screenY, projectileSize * 0.45f, Color{255, 244, 206, 255});
 }
 } // namespace
 
@@ -415,6 +472,24 @@ void DrawTargets(
     {
         DrawTarget(player, targets[index], depthBuffer);
     }
+
+    std::sort(targetOrder.begin(), targetOrder.end(), [&player, &targets](int left, int right) {
+        const Vector2 toLeft = {
+            targets[left].projectilePosition.x - player.position.x,
+            targets[left].projectilePosition.y - player.position.y,
+        };
+        const Vector2 toRight = {
+            targets[right].projectilePosition.x - player.position.x,
+            targets[right].projectilePosition.y - player.position.y,
+        };
+
+        return LengthSquared(toLeft) > LengthSquared(toRight);
+    });
+
+    for (int index : targetOrder)
+    {
+        DrawProjectile(player, targets[index], depthBuffer);
+    }
 }
 
 void DrawWeapon(const entities::Player& player, const entities::WeaponState& weapon)
@@ -514,6 +589,7 @@ void DrawMiniMap(const entities::Player& player, const std::array<entities::Targ
 void DrawHud(
     const entities::Player& player,
     const entities::WeaponState& weapon,
+    int difficultyLevel,
     int score,
     int bestScore,
     int hitCount,
@@ -524,7 +600,7 @@ void DrawHud(
     bool isGameOver)
 {
     constexpr int kHudWidth = 248;
-    constexpr int kHudHeight = 178;
+    constexpr int kHudHeight = 200;
     constexpr int kHudPadding = 16;
 
     const int hudX = kScreenWidth - kHudWidth - kHudPadding;
@@ -556,7 +632,8 @@ void DrawHud(
     DrawText(TextFormat("SCORE %04i | BEST %04i", score, bestScore), hudX + 12, hudY + 96, 18, secondaryTextColor);
     DrawText(TextFormat("TIME %02i:%02i.%01i", currentMinutes, currentSeconds, currentTenths), hudX + 12, hudY + 116, 18, secondaryTextColor);
     DrawText(TextFormat("BEST %02i:%02i.%01i", bestMinutes, bestSeconds, bestTenths), hudX + 12, hudY + 136, 18, secondaryTextColor);
-    DrawText(TextFormat("HITS %02i | ELIMS %02i | ALIVE %02i", hitCount, destroyedCount, aliveCount), hudX + 12, hudY + 156, 18, secondaryTextColor);
+    DrawText(TextFormat("INTENSITY LVL %02i", difficultyLevel), hudX + 12, hudY + 156, 18, secondaryTextColor);
+    DrawText(TextFormat("HITS %02i | ELIMS %02i | ALIVE %02i", hitCount, destroyedCount, aliveCount), hudX + 12, hudY + 176, 18, secondaryTextColor);
 
     if (player.damageFlash > 0.0f)
     {

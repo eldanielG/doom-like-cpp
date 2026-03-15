@@ -32,6 +32,7 @@ void DrawMiniMap(const entities::Player& player, const std::array<entities::Targ
 void DrawHud(
     const entities::Player& player,
     const entities::WeaponState& weapon,
+    int difficultyLevel,
     int score,
     int bestScore,
     int hitCount,

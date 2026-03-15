@@ -17,14 +17,35 @@ constexpr float kTargetReactionRecovery = 7.0f;
 constexpr float kTargetDestroyFlashRecovery = 2.2f;
 constexpr float kTargetRespawnDelay = 1.8f;
 constexpr float kTargetRespawnFlashRecovery = 3.6f;
+constexpr float kTargetAttackFlashRecovery = 6.0f;
 constexpr float kTargetAimAssist = 1.35f;
+constexpr float kTargetAttackRange = 5.5f;
+constexpr float kTargetAttackCooldown = 1.15f;
+constexpr float kTargetChaseStartDistance = 2.65f;
+constexpr float kTargetChaseStopDistance = 3.15f;
+constexpr float kTargetChaseLostSightGraceTime = 2.0f;
+constexpr int kTargetDifficultyMaxLevel = 6;
+constexpr float kTargetDifficultyPatrolSpeedStep = 0.08f;
+constexpr float kTargetDifficultyChaseSpeedStep = 0.10f;
+constexpr float kTargetDifficultyRespawnReductionStep = 0.07f;
+constexpr float kTargetChaseMoveSpeed = 1.2f;
 constexpr float kMinimumTargetSpawnDistanceFromPlayer = 2.75f;
 constexpr float kTargetDamagePadding = 0.12f;
 constexpr float kTargetMoveSpeed = 0.9f;
 constexpr float kTargetPatrolDistance = 1.25f;
+constexpr float kTargetProjectileRadius = 0.09f;
+constexpr float kTargetProjectileSpeed = 5.8f;
 constexpr float kTargetBaseSize = 0.8f;
 constexpr int kTargetStartHealth = 2;
 constexpr int kTargetContactDamage = 20;
+constexpr int kTargetProjectileDamage = 12;
+
+struct TargetDifficultyTuning
+{
+    float patrolSpeedMultiplier;
+    float chaseSpeedMultiplier;
+    float respawnDelay;
+};
 
 const std::array<Vector2, 4> kTargetPatrolOffsets = {{
     {kTargetPatrolDistance, 0.0f},
@@ -77,6 +98,18 @@ Vector2 Lerp(Vector2 from, Vector2 to, float amount)
 float ClampDeltaTime(float deltaTime)
 {
     return std::min(deltaTime, kMaxDeltaTime);
+}
+
+TargetDifficultyTuning GetTargetDifficultyTuning(int difficultyLevel)
+{
+    const int clampedDifficultyLevel = std::clamp(difficultyLevel, 1, kTargetDifficultyMaxLevel);
+    const float difficultyStep = static_cast<float>(clampedDifficultyLevel - 1);
+
+    return TargetDifficultyTuning{
+        1.0f + (difficultyStep * kTargetDifficultyPatrolSpeedStep),
+        1.0f + (difficultyStep * kTargetDifficultyChaseSpeedStep),
+        kTargetRespawnDelay * std::max(0.65f, 1.0f - (difficultyStep * kTargetDifficultyRespawnReductionStep)),
+    };
 }
 
 std::array<bool, world::kTargetSpawnPointCount> CollectUsedTargetSpawnPoints(
@@ -162,14 +195,22 @@ void SpawnTarget(entities::Target& target, int spawnIndex)
     target.position = world::GetTargetSpawnPoints()[spawnIndex];
     target.patrolStart = target.position;
     target.patrolEnd = ChooseTargetPatrolPoint(target.position);
+    target.lastSeenPlayerPosition = target.position;
+    target.projectilePosition = target.position;
+    target.projectileVelocity = Vector2{0.0f, 0.0f};
     target.hitFlash = 0.0f;
     target.hitReaction = 0.0f;
     target.destroyFlash = 0.0f;
     target.respawnTimer = 0.0f;
     target.respawnFlash = 1.0f;
+    target.shootCooldown = 0.35f;
+    target.attackFlash = 0.0f;
+    target.chaseVisibilityGraceTimer = 0.0f;
     target.moveSpeed = kTargetMoveSpeed;
     target.health = kTargetStartHealth;
     target.spawnIndex = spawnIndex;
+    target.projectileActive = false;
+    target.chasingPlayer = false;
     target.movingToPatrolEnd = true;
     target.destroyed = false;
 }
@@ -251,6 +292,106 @@ bool CanDamagePlayer(const entities::Target& target, const entities::Player& pla
 
     return wallHit.distance + world::kPlayerRadius >= playerDistance;
 }
+
+bool HasLineOfSightToPlayer(
+    const entities::Target& target,
+    const entities::Player& player,
+    float maximumDistance,
+    float& playerDistance,
+    Vector2& toPlayerDirection)
+{
+    const Vector2 toPlayer = {
+        player.position.x - target.position.x,
+        player.position.y - target.position.y,
+    };
+    const float distanceSquared = LengthSquared(toPlayer);
+
+    if (distanceSquared <= 0.0001f)
+    {
+        playerDistance = 0.0f;
+        toPlayerDirection = Vector2{0.0f, 0.0f};
+        return false;
+    }
+
+    playerDistance = std::sqrt(distanceSquared);
+    if (playerDistance > maximumDistance)
+    {
+        return false;
+    }
+
+    toPlayerDirection = {
+        toPlayer.x / playerDistance,
+        toPlayer.y / playerDistance,
+    };
+    const render::RayHit wallHit = render::CastRay(target.position, toPlayerDirection);
+    return wallHit.distance + world::kPlayerRadius >= playerDistance;
+}
+
+void FireProjectile(entities::Target& target, Vector2 direction)
+{
+    target.projectileActive = true;
+    target.projectilePosition = target.position;
+    target.projectileVelocity = {
+        direction.x * kTargetProjectileSpeed,
+        direction.y * kTargetProjectileSpeed,
+    };
+    target.shootCooldown = kTargetAttackCooldown;
+    target.attackFlash = 1.0f;
+}
+
+bool MoveTarget(entities::Target& target, Vector2 movementStep)
+{
+    bool moved = false;
+
+    const Vector2 nextX = {target.position.x + movementStep.x, target.position.y};
+    if (world::CanMoveTo(nextX))
+    {
+        target.position.x = nextX.x;
+        moved = moved || (std::fabs(movementStep.x) > 0.0f);
+    }
+
+    const Vector2 nextY = {target.position.x, target.position.y + movementStep.y};
+    if (world::CanMoveTo(nextY))
+    {
+        target.position.y = nextY.y;
+        moved = moved || (std::fabs(movementStep.y) > 0.0f);
+    }
+
+    return moved;
+}
+
+void UpdateProjectile(entities::Target& target, entities::Player& player, float deltaTime)
+{
+    if (!target.projectileActive)
+    {
+        return;
+    }
+
+    const float stepDistance = kTargetProjectileSpeed * deltaTime;
+    const Vector2 projectileDirection = Normalize(target.projectileVelocity);
+    const render::RayHit wallHit = render::CastRay(target.projectilePosition, projectileDirection);
+
+    if (wallHit.distance <= stepDistance)
+    {
+        target.projectileActive = false;
+        return;
+    }
+
+    target.projectilePosition.x += target.projectileVelocity.x * deltaTime;
+    target.projectilePosition.y += target.projectileVelocity.y * deltaTime;
+
+    const Vector2 toPlayer = {
+        player.position.x - target.projectilePosition.x,
+        player.position.y - target.projectilePosition.y,
+    };
+    const float hitRadius = world::kPlayerRadius + kTargetProjectileRadius;
+
+    if (LengthSquared(toPlayer) <= (hitRadius * hitRadius))
+    {
+        ApplyDamage(player, kTargetProjectileDamage);
+        target.projectileActive = false;
+    }
+}
 } // namespace
 
 namespace entities
@@ -261,7 +402,13 @@ Target MakeTarget(Vector2 spawnPosition)
         spawnPosition,
         spawnPosition,
         spawnPosition,
+        spawnPosition,
+        spawnPosition,
+        Vector2{0.0f, 0.0f},
         kTargetBaseSize,
+        0.0f,
+        0.0f,
+        0.0f,
         0.0f,
         0.0f,
         0.0f,
@@ -270,6 +417,8 @@ Target MakeTarget(Vector2 spawnPosition)
         kTargetMoveSpeed,
         kTargetStartHealth,
         -1,
+        false,
+        false,
         true,
         true,
     };
@@ -289,51 +438,125 @@ std::array<Target, kTargetCount> MakeTargets(const Player& player)
     return targets;
 }
 
-void UpdateTarget(Target& target, float deltaTime)
+void UpdateTarget(Target& target, Player& player, float deltaTime, int difficultyLevel)
 {
     const float clampedDeltaTime = ClampDeltaTime(deltaTime);
+    const TargetDifficultyTuning difficulty = GetTargetDifficultyTuning(difficultyLevel);
     target.hitFlash = std::max(0.0f, target.hitFlash - (kTargetHitFlashRecovery * clampedDeltaTime));
     target.hitReaction = std::max(0.0f, target.hitReaction - (kTargetReactionRecovery * clampedDeltaTime));
     target.destroyFlash = std::max(0.0f, target.destroyFlash - (kTargetDestroyFlashRecovery * clampedDeltaTime));
     target.respawnFlash = std::max(0.0f, target.respawnFlash - (kTargetRespawnFlashRecovery * clampedDeltaTime));
+    target.attackFlash = std::max(0.0f, target.attackFlash - (kTargetAttackFlashRecovery * clampedDeltaTime));
+
+    UpdateProjectile(target, player, clampedDeltaTime);
 
     if (target.destroyed)
     {
         return;
     }
 
-    const Vector2 goalPoint = target.movingToPatrolEnd ? target.patrolEnd : target.patrolStart;
-    const Vector2 toGoal = {
-        goalPoint.x - target.position.x,
-        goalPoint.y - target.position.y,
-    };
-    const float distanceSquared = LengthSquared(toGoal);
+    target.shootCooldown = std::max(0.0f, target.shootCooldown - clampedDeltaTime);
+    target.chaseVisibilityGraceTimer = std::max(0.0f, target.chaseVisibilityGraceTimer - clampedDeltaTime);
 
-    if (distanceSquared <= 0.0025f)
+    const Vector2 toPlayer = {
+        player.position.x - target.position.x,
+        player.position.y - target.position.y,
+    };
+    float chasePlayerDistance = 0.0f;
+    Vector2 chaseDirection = {0.0f, 0.0f};
+    const bool hasChaseLineOfSight = HasLineOfSightToPlayer(
+        target,
+        player,
+        kTargetChaseStopDistance,
+        chasePlayerDistance,
+        chaseDirection);
+    const bool canStartChase = hasChaseLineOfSight && chasePlayerDistance <= kTargetChaseStartDistance;
+    const bool canKeepChasing = hasChaseLineOfSight && chasePlayerDistance <= kTargetChaseStopDistance;
+
+    if (target.chasingPlayer)
     {
-        target.movingToPatrolEnd = !target.movingToPatrolEnd;
-        return;
+        if (canKeepChasing)
+        {
+            target.lastSeenPlayerPosition = player.position;
+            target.chaseVisibilityGraceTimer = kTargetChaseLostSightGraceTime;
+        }
+        else if (target.chaseVisibilityGraceTimer <= 0.0f)
+        {
+            target.chasingPlayer = false;
+        }
+    }
+    else if (canStartChase)
+    {
+        target.chasingPlayer = true;
+        target.lastSeenPlayerPosition = player.position;
+        target.chaseVisibilityGraceTimer = kTargetChaseLostSightGraceTime;
     }
 
-    Vector2 movementStep = Normalize(toGoal);
-    movementStep.x *= target.moveSpeed * clampedDeltaTime;
-    movementStep.y *= target.moveSpeed * clampedDeltaTime;
-
-    if (LengthSquared(movementStep) > distanceSquared)
+    if (!target.projectileActive)
     {
-        movementStep = toGoal;
+        float playerDistance = 0.0f;
+        Vector2 toPlayerDirection = {0.0f, 0.0f};
+        if (HasLineOfSightToPlayer(target, player, kTargetAttackRange, playerDistance, toPlayerDirection) &&
+            target.shootCooldown <= 0.0f)
+        {
+            FireProjectile(target, toPlayerDirection);
+        }
     }
 
-    const Vector2 nextPosition = {
-        target.position.x + movementStep.x,
-        target.position.y + movementStep.y,
-    };
+    Vector2 movementStep = {0.0f, 0.0f};
+    bool reversePatrolDirection = false;
 
-    if (world::CanMoveTo(nextPosition))
+    if (target.chasingPlayer)
     {
-        target.position = nextPosition;
+        const Vector2 chaseGoal = canKeepChasing ? player.position : target.lastSeenPlayerPosition;
+        const Vector2 toChaseGoal = {
+            chaseGoal.x - target.position.x,
+            chaseGoal.y - target.position.y,
+        };
+        const float chaseGoalDistanceSquared = LengthSquared(toChaseGoal);
+
+        if (chaseGoalDistanceSquared > 0.0025f)
+        {
+            const Vector2 chaseMoveDirection = Normalize(toChaseGoal);
+            const float chaseMoveSpeed = kTargetChaseMoveSpeed * difficulty.chaseSpeedMultiplier;
+            movementStep.x = chaseMoveDirection.x * chaseMoveSpeed * clampedDeltaTime;
+            movementStep.y = chaseMoveDirection.y * chaseMoveSpeed * clampedDeltaTime;
+
+            if (LengthSquared(movementStep) > chaseGoalDistanceSquared)
+            {
+                movementStep = toChaseGoal;
+            }
+        }
     }
     else
+    {
+        const Vector2 goalPoint = target.movingToPatrolEnd ? target.patrolEnd : target.patrolStart;
+        const Vector2 toGoal = {
+            goalPoint.x - target.position.x,
+            goalPoint.y - target.position.y,
+        };
+        const float distanceSquared = LengthSquared(toGoal);
+
+        if (distanceSquared <= 0.0025f)
+        {
+            target.movingToPatrolEnd = !target.movingToPatrolEnd;
+            return;
+        }
+
+        movementStep = Normalize(toGoal);
+        const float patrolMoveSpeed = target.moveSpeed * difficulty.patrolSpeedMultiplier;
+        movementStep.x *= patrolMoveSpeed * clampedDeltaTime;
+        movementStep.y *= patrolMoveSpeed * clampedDeltaTime;
+
+        if (LengthSquared(movementStep) > distanceSquared)
+        {
+            movementStep = toGoal;
+        }
+
+        reversePatrolDirection = true;
+    }
+
+    if (!MoveTarget(target, movementStep) && reversePatrolDirection)
     {
         target.movingToPatrolEnd = !target.movingToPatrolEnd;
     }
@@ -362,8 +585,14 @@ void HandleTargetRespawns(const Player& player, std::array<Target, kTargetCount>
     }
 }
 
-bool TryHitTargets(const Player& player, std::array<Target, kTargetCount>& targets, int& hitCount, int& destroyedCount)
+bool TryHitTargets(
+    const Player& player,
+    std::array<Target, kTargetCount>& targets,
+    int& hitCount,
+    int& destroyedCount,
+    int difficultyLevel)
 {
+    const TargetDifficultyTuning difficulty = GetTargetDifficultyTuning(difficultyLevel);
     int bestTargetIndex = -1;
     float bestTargetDistance = std::numeric_limits<float>::max();
 
@@ -398,7 +627,7 @@ bool TryHitTargets(const Player& player, std::array<Target, kTargetCount>& targe
     {
         target.destroyed = true;
         target.destroyFlash = 1.0f;
-        target.respawnTimer = kTargetRespawnDelay;
+        target.respawnTimer = difficulty.respawnDelay;
         target.respawnFlash = 0.0f;
         ++destroyedCount;
     }

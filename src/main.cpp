@@ -20,6 +20,7 @@ int main()
         EndDrawing();
     }
 
+    core::DestroyGameState(game);
     CloseWindow();
     return 0;
 }

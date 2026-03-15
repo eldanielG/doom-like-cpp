@@ -30,3 +30,8 @@ cmake --build build
 Executavel gerado:
 
 - `build/doom_like`
+
+## Documentacao
+
+- Creditos de audio e status de assets: [CREDITS.md](./CREDITS.md)
+- Historico de versoes e release notes: [CHANGELOG.md](./CHANGELOG.md)

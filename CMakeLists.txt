@@ -26,6 +26,7 @@ endif()
 
 add_executable(doom_like
     src/main.cpp
+    src/core/audio.cpp
     src/core/game.cpp
     src/entities/player.cpp
     src/entities/target.cpp

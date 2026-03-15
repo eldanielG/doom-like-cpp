@@ -10,14 +10,28 @@ namespace core
 namespace
 {
 constexpr int kScorePerElimination = 100;
+constexpr float kDifficultyStepInterval = 20.0f;
+constexpr int kMaxDifficultyLevel = 6;
+
+int CalculateDifficultyLevel(float survivalTime)
+{
+    const int difficultySteps = static_cast<int>(survivalTime / kDifficultyStepInterval);
+    return std::min(1 + difficultySteps, kMaxDifficultyLevel);
+}
 }
 
 GameState CreateGameState()
 {
     GameState game{};
+    InitializeAudio(game.audio);
     game.depthBuffer.assign(render::kScreenWidth, 0.0f);
     ResetGame(game);
     return game;
+}
+
+void DestroyGameState(GameState& game)
+{
+    ShutdownAudio(game.audio);
 }
 
 void ResetGame(GameState& game)
@@ -30,6 +44,7 @@ void ResetGame(GameState& game)
     game.player = entities::MakePlayer(world::ChoosePlayerSpawnPoint());
     game.weapon = entities::MakeWeaponState();
     game.targets = entities::MakeTargets(game.player);
+    game.difficultyLevel = 1;
     game.score = 0;
     game.hitCount = 0;
     game.destroyedCount = 0;
@@ -51,21 +66,35 @@ void UpdateGame(GameState& game, float deltaTime)
 
     game.survivalTime += deltaTime;
     game.bestSurvivalTime = std::max(game.bestSurvivalTime, game.survivalTime);
+    game.difficultyLevel = CalculateDifficultyLevel(game.survivalTime);
 
+    const int playerHealthBeforeDamage = game.player.health;
     entities::UpdatePlayer(game.player, deltaTime);
     entities::UpdateWeapon(game.weapon, deltaTime);
 
     for (entities::Target& target : game.targets)
     {
-        entities::UpdateTarget(target, deltaTime);
+        entities::UpdateTarget(target, game.player, deltaTime, game.difficultyLevel);
     }
 
     entities::HandleTargetRespawns(game.player, game.targets, deltaTime);
 
-    const int destroyedBeforeShot = game.destroyedCount;
-    if (entities::TryFireWeapon(game.weapon) &&
-        entities::TryHitTargets(game.player, game.targets, game.hitCount, game.destroyedCount))
+    const bool firedShot = entities::TryFireWeapon(game.weapon);
+    if (firedShot)
     {
+        PlayShootSound(game.audio);
+    }
+
+    const int destroyedBeforeShot = game.destroyedCount;
+    if (firedShot &&
+        entities::TryHitTargets(
+            game.player,
+            game.targets,
+            game.hitCount,
+            game.destroyedCount,
+            game.difficultyLevel))
+    {
+        PlayHitSound(game.audio);
         game.weapon.hitMarker = 1.0f;
 
         const int eliminatedThisShot = game.destroyedCount - destroyedBeforeShot;
@@ -76,9 +105,17 @@ void UpdateGame(GameState& game, float deltaTime)
         }
     }
 
-    if (entities::TryDamagePlayerFromTargets(game.player, game.targets) && game.player.health == 0)
+    entities::TryDamagePlayerFromTargets(game.player, game.targets);
+
+    if (game.player.health < playerHealthBeforeDamage)
+    {
+        PlayPlayerHurtSound(game.audio);
+    }
+
+    if (!game.isGameOver && game.player.health == 0)
     {
         game.isGameOver = true;
+        PlayGameOverSound(game.audio);
     }
 }
 
@@ -91,6 +128,7 @@ void DrawGame(GameState& game)
     render::DrawHud(
         game.player,
         game.weapon,
+        game.difficultyLevel,
         game.score,
         game.bestScore,
         game.hitCount,
