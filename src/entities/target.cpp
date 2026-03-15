@@ -5,53 +5,20 @@
 #include <cmath>
 #include <limits>
 
+#include "core/tuning.h"
 #include "render/renderer.h"
 #include "world/world.h"
 
 namespace
 {
-constexpr float kPi = 3.1415926535f;
+constexpr float kPi = core::tuning::kPi;
 constexpr float kMaxDeltaTime = 1.0f / 30.0f;
-constexpr float kTargetHitFlashRecovery = 4.0f;
-constexpr float kTargetReactionRecovery = 7.0f;
-constexpr float kTargetDestroyFlashRecovery = 2.2f;
-constexpr float kTargetRespawnDelay = 1.8f;
-constexpr float kTargetRespawnFlashRecovery = 3.6f;
-constexpr float kTargetAttackFlashRecovery = 6.0f;
-constexpr float kTargetAimAssist = 1.35f;
-constexpr float kTargetAttackRange = 5.5f;
-constexpr float kTargetAttackCooldown = 1.15f;
-constexpr float kTargetChaseStartDistance = 2.65f;
-constexpr float kTargetChaseStopDistance = 3.15f;
-constexpr float kTargetChaseLostSightGraceTime = 2.0f;
-constexpr int kTargetDifficultyMaxLevel = 6;
-constexpr float kTargetDifficultyPatrolSpeedStep = 0.08f;
-constexpr float kTargetDifficultyChaseSpeedStep = 0.10f;
-constexpr float kTargetDifficultyRespawnReductionStep = 0.07f;
-constexpr float kTargetChaseMoveSpeed = 1.2f;
-constexpr float kMinimumTargetSpawnDistanceFromPlayer = 2.75f;
-constexpr float kTargetDamagePadding = 0.12f;
-constexpr float kTargetMoveSpeed = 0.9f;
-constexpr float kTargetPatrolDistance = 1.25f;
-constexpr float kTargetProjectileRadius = 0.09f;
-constexpr float kTargetProjectileSpeed = 5.8f;
-constexpr float kTargetBaseSize = 0.8f;
-constexpr int kTargetStartHealth = 2;
-constexpr int kTargetContactDamage = 20;
-constexpr int kTargetProjectileDamage = 12;
-
-struct TargetDifficultyTuning
-{
-    float patrolSpeedMultiplier;
-    float chaseSpeedMultiplier;
-    float respawnDelay;
-};
 
 const std::array<Vector2, 4> kTargetPatrolOffsets = {{
-    {kTargetPatrolDistance, 0.0f},
-    {-kTargetPatrolDistance, 0.0f},
-    {0.0f, kTargetPatrolDistance},
-    {0.0f, -kTargetPatrolDistance},
+    {core::tuning::kEnemy.patrolDistance, 0.0f},
+    {-core::tuning::kEnemy.patrolDistance, 0.0f},
+    {0.0f, core::tuning::kEnemy.patrolDistance},
+    {0.0f, -core::tuning::kEnemy.patrolDistance},
 }};
 
 float NormalizeRelativeAngle(float angle)
@@ -100,18 +67,6 @@ float ClampDeltaTime(float deltaTime)
     return std::min(deltaTime, kMaxDeltaTime);
 }
 
-TargetDifficultyTuning GetTargetDifficultyTuning(int difficultyLevel)
-{
-    const int clampedDifficultyLevel = std::clamp(difficultyLevel, 1, kTargetDifficultyMaxLevel);
-    const float difficultyStep = static_cast<float>(clampedDifficultyLevel - 1);
-
-    return TargetDifficultyTuning{
-        1.0f + (difficultyStep * kTargetDifficultyPatrolSpeedStep),
-        1.0f + (difficultyStep * kTargetDifficultyChaseSpeedStep),
-        kTargetRespawnDelay * std::max(0.65f, 1.0f - (difficultyStep * kTargetDifficultyRespawnReductionStep)),
-    };
-}
-
 std::array<bool, world::kTargetSpawnPointCount> CollectUsedTargetSpawnPoints(
     const std::array<entities::Target, entities::kTargetCount>& targets)
 {
@@ -137,7 +92,7 @@ int ChooseTargetSpawnIndex(const entities::Player& player, const std::array<enti
         world::GetTargetSpawnPoints(),
         usedSpawnPoints,
         &player.position,
-        kMinimumTargetSpawnDistanceFromPlayer);
+        core::tuning::kEnemy.minimumSpawnDistanceFromPlayer);
 }
 
 bool IsPatrolPathValid(Vector2 startPoint, Vector2 endPoint)
@@ -192,7 +147,9 @@ Vector2 ChooseTargetPatrolPoint(Vector2 spawnPoint)
 
 void SpawnTarget(entities::Target& target, int spawnIndex)
 {
-    target.position = world::GetTargetSpawnPoints()[spawnIndex];
+    const world::TargetSpawnPoint& spawnPoint = world::GetTargetSpawnPoints()[spawnIndex];
+    const core::tuning::EnemyVariantTuning archetype = core::tuning::GetEnemyVariantTuning(spawnPoint.type);
+    target.position = spawnPoint.position;
     target.patrolStart = target.position;
     target.patrolEnd = ChooseTargetPatrolPoint(target.position);
     target.lastSeenPlayerPosition = target.position;
@@ -203,12 +160,14 @@ void SpawnTarget(entities::Target& target, int spawnIndex)
     target.destroyFlash = 0.0f;
     target.respawnTimer = 0.0f;
     target.respawnFlash = 1.0f;
-    target.shootCooldown = 0.35f;
+    target.shootCooldown = core::tuning::kEnemy.initialShootCooldown;
     target.attackFlash = 0.0f;
     target.chaseVisibilityGraceTimer = 0.0f;
-    target.moveSpeed = kTargetMoveSpeed;
-    target.health = kTargetStartHealth;
+    target.moveSpeed = archetype.patrolMoveSpeed;
+    target.health = archetype.maxHealth;
     target.spawnIndex = spawnIndex;
+    target.type = spawnPoint.type;
+    target.size = archetype.size;
     target.projectileActive = false;
     target.chasingPlayer = false;
     target.movingToPatrolEnd = true;
@@ -237,7 +196,7 @@ bool CanHitTarget(const entities::Player& player, const entities::Target& target
     const float targetAngle = std::atan2(toTarget.y, toTarget.x);
     const float angleDifference = NormalizeRelativeAngle(targetAngle - player.angle);
     const float targetRadius = target.size * 0.35f;
-    const float aimWindow = std::atan2(targetRadius, targetDistance) * kTargetAimAssist;
+    const float aimWindow = std::atan2(targetRadius, targetDistance) * core::tuning::kEnemy.aimAssist;
 
     if (std::fabs(angleDifference) > aimWindow)
     {
@@ -277,7 +236,7 @@ bool CanDamagePlayer(const entities::Target& target, const entities::Player& pla
     }
 
     const float playerDistance = std::sqrt(distanceSquared);
-    const float damageRange = world::kPlayerRadius + (target.size * 0.35f) + kTargetDamagePadding;
+    const float damageRange = world::kPlayerRadius + (target.size * 0.35f) + core::tuning::kEnemy.damagePadding;
 
     if (playerDistance > damageRange)
     {
@@ -329,13 +288,14 @@ bool HasLineOfSightToPlayer(
 
 void FireProjectile(entities::Target& target, Vector2 direction)
 {
+    const core::tuning::EnemyVariantTuning archetype = core::tuning::GetEnemyVariantTuning(target.type);
     target.projectileActive = true;
     target.projectilePosition = target.position;
     target.projectileVelocity = {
-        direction.x * kTargetProjectileSpeed,
-        direction.y * kTargetProjectileSpeed,
+        direction.x * archetype.projectileSpeed,
+        direction.y * archetype.projectileSpeed,
     };
-    target.shootCooldown = kTargetAttackCooldown;
+    target.shootCooldown = archetype.attackCooldown;
     target.attackFlash = 1.0f;
 }
 
@@ -367,7 +327,8 @@ void UpdateProjectile(entities::Target& target, entities::Player& player, float 
         return;
     }
 
-    const float stepDistance = kTargetProjectileSpeed * deltaTime;
+    const core::tuning::EnemyVariantTuning archetype = core::tuning::GetEnemyVariantTuning(target.type);
+    const float stepDistance = archetype.projectileSpeed * deltaTime;
     const Vector2 projectileDirection = Normalize(target.projectileVelocity);
     const render::RayHit wallHit = render::CastRay(target.projectilePosition, projectileDirection);
 
@@ -384,11 +345,11 @@ void UpdateProjectile(entities::Target& target, entities::Player& player, float 
         player.position.x - target.projectilePosition.x,
         player.position.y - target.projectilePosition.y,
     };
-    const float hitRadius = world::kPlayerRadius + kTargetProjectileRadius;
+    const float hitRadius = world::kPlayerRadius + archetype.projectileRadius;
 
     if (LengthSquared(toPlayer) <= (hitRadius * hitRadius))
     {
-        ApplyDamage(player, kTargetProjectileDamage);
+        ApplyDamage(player, archetype.projectileDamage);
         target.projectileActive = false;
     }
 }
@@ -405,7 +366,7 @@ Target MakeTarget(Vector2 spawnPosition)
         spawnPosition,
         spawnPosition,
         Vector2{0.0f, 0.0f},
-        kTargetBaseSize,
+        core::tuning::kEnemy.baseSize,
         0.0f,
         0.0f,
         0.0f,
@@ -414,9 +375,10 @@ Target MakeTarget(Vector2 spawnPosition)
         0.0f,
         0.0f,
         0.0f,
-        kTargetMoveSpeed,
-        kTargetStartHealth,
+        core::tuning::GetEnemyVariantTuning(TargetType::Standard).patrolMoveSpeed,
+        core::tuning::GetEnemyVariantTuning(TargetType::Standard).maxHealth,
         -1,
+        TargetType::Standard,
         false,
         false,
         true,
@@ -441,12 +403,13 @@ std::array<Target, kTargetCount> MakeTargets(const Player& player)
 void UpdateTarget(Target& target, Player& player, float deltaTime, int difficultyLevel)
 {
     const float clampedDeltaTime = ClampDeltaTime(deltaTime);
-    const TargetDifficultyTuning difficulty = GetTargetDifficultyTuning(difficultyLevel);
-    target.hitFlash = std::max(0.0f, target.hitFlash - (kTargetHitFlashRecovery * clampedDeltaTime));
-    target.hitReaction = std::max(0.0f, target.hitReaction - (kTargetReactionRecovery * clampedDeltaTime));
-    target.destroyFlash = std::max(0.0f, target.destroyFlash - (kTargetDestroyFlashRecovery * clampedDeltaTime));
-    target.respawnFlash = std::max(0.0f, target.respawnFlash - (kTargetRespawnFlashRecovery * clampedDeltaTime));
-    target.attackFlash = std::max(0.0f, target.attackFlash - (kTargetAttackFlashRecovery * clampedDeltaTime));
+    const core::tuning::EnemyDifficultyTuning difficulty = core::tuning::GetEnemyDifficultyTuning(difficultyLevel);
+    const core::tuning::EnemyVariantTuning archetype = core::tuning::GetEnemyVariantTuning(target.type);
+    target.hitFlash = std::max(0.0f, target.hitFlash - (core::tuning::kEnemy.hitFlashRecovery * clampedDeltaTime));
+    target.hitReaction = std::max(0.0f, target.hitReaction - (core::tuning::kEnemy.reactionRecovery * clampedDeltaTime));
+    target.destroyFlash = std::max(0.0f, target.destroyFlash - (core::tuning::kEnemy.destroyFlashRecovery * clampedDeltaTime));
+    target.respawnFlash = std::max(0.0f, target.respawnFlash - (core::tuning::kEnemy.respawnFlashRecovery * clampedDeltaTime));
+    target.attackFlash = std::max(0.0f, target.attackFlash - (core::tuning::kEnemy.attackFlashRecovery * clampedDeltaTime));
 
     UpdateProjectile(target, player, clampedDeltaTime);
 
@@ -467,18 +430,18 @@ void UpdateTarget(Target& target, Player& player, float deltaTime, int difficult
     const bool hasChaseLineOfSight = HasLineOfSightToPlayer(
         target,
         player,
-        kTargetChaseStopDistance,
+        core::tuning::kEnemy.chaseStopDistance,
         chasePlayerDistance,
         chaseDirection);
-    const bool canStartChase = hasChaseLineOfSight && chasePlayerDistance <= kTargetChaseStartDistance;
-    const bool canKeepChasing = hasChaseLineOfSight && chasePlayerDistance <= kTargetChaseStopDistance;
+    const bool canStartChase = hasChaseLineOfSight && chasePlayerDistance <= core::tuning::kEnemy.chaseStartDistance;
+    const bool canKeepChasing = hasChaseLineOfSight && chasePlayerDistance <= core::tuning::kEnemy.chaseStopDistance;
 
     if (target.chasingPlayer)
     {
         if (canKeepChasing)
         {
             target.lastSeenPlayerPosition = player.position;
-            target.chaseVisibilityGraceTimer = kTargetChaseLostSightGraceTime;
+            target.chaseVisibilityGraceTimer = core::tuning::kEnemy.chaseLostSightGraceTime;
         }
         else if (target.chaseVisibilityGraceTimer <= 0.0f)
         {
@@ -489,14 +452,14 @@ void UpdateTarget(Target& target, Player& player, float deltaTime, int difficult
     {
         target.chasingPlayer = true;
         target.lastSeenPlayerPosition = player.position;
-        target.chaseVisibilityGraceTimer = kTargetChaseLostSightGraceTime;
+        target.chaseVisibilityGraceTimer = core::tuning::kEnemy.chaseLostSightGraceTime;
     }
 
     if (!target.projectileActive)
     {
         float playerDistance = 0.0f;
         Vector2 toPlayerDirection = {0.0f, 0.0f};
-        if (HasLineOfSightToPlayer(target, player, kTargetAttackRange, playerDistance, toPlayerDirection) &&
+        if (HasLineOfSightToPlayer(target, player, core::tuning::kEnemy.attackRange, playerDistance, toPlayerDirection) &&
             target.shootCooldown <= 0.0f)
         {
             FireProjectile(target, toPlayerDirection);
@@ -518,7 +481,7 @@ void UpdateTarget(Target& target, Player& player, float deltaTime, int difficult
         if (chaseGoalDistanceSquared > 0.0025f)
         {
             const Vector2 chaseMoveDirection = Normalize(toChaseGoal);
-            const float chaseMoveSpeed = kTargetChaseMoveSpeed * difficulty.chaseSpeedMultiplier;
+            const float chaseMoveSpeed = archetype.chaseMoveSpeed * difficulty.chaseSpeedMultiplier;
             movementStep.x = chaseMoveDirection.x * chaseMoveSpeed * clampedDeltaTime;
             movementStep.y = chaseMoveDirection.y * chaseMoveSpeed * clampedDeltaTime;
 
@@ -592,7 +555,7 @@ bool TryHitTargets(
     int& destroyedCount,
     int difficultyLevel)
 {
-    const TargetDifficultyTuning difficulty = GetTargetDifficultyTuning(difficultyLevel);
+    const core::tuning::EnemyDifficultyTuning difficulty = core::tuning::GetEnemyDifficultyTuning(difficultyLevel);
     int bestTargetIndex = -1;
     float bestTargetDistance = std::numeric_limits<float>::max();
 
@@ -618,7 +581,7 @@ bool TryHitTargets(
     }
 
     Target& target = targets[bestTargetIndex];
-    target.health = std::max(0, target.health - 1);
+    target.health = std::max(0, target.health - core::tuning::kWeapon.damagePerShot);
     target.hitFlash = 1.0f;
     target.hitReaction = 1.0f;
     ++hitCount;
@@ -661,7 +624,7 @@ bool TryDamagePlayerFromTargets(Player& player, const std::array<Target, kTarget
         return false;
     }
 
-    return ApplyDamage(player, kTargetContactDamage);
+    return ApplyDamage(player, core::tuning::GetEnemyVariantTuning(targets[closestTargetIndex].type).contactDamage);
 }
 
 int CountAliveTargets(const std::array<Target, kTargetCount>& targets)

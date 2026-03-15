@@ -9,6 +9,20 @@
 
 namespace core
 {
+enum class GamePhase : unsigned char
+{
+    Title,
+    Gameplay,
+    Pause,
+    GameOver,
+};
+
+enum class PauseMode : unsigned char
+{
+    Quick,
+    Menu,
+};
+
 struct GameState
 {
     AudioState audio{};
@@ -16,6 +30,9 @@ struct GameState
     entities::WeaponState weapon{};
     std::array<entities::Target, entities::kTargetCount> targets{};
     std::vector<float> depthBuffer;
+    GamePhase phase = GamePhase::Title;
+    PauseMode pauseMode = PauseMode::Quick;
+    int pauseMenuSelection = 0;
     int difficultyLevel = 1;
     int score = 0;
     int bestScore = 0;
@@ -23,7 +40,7 @@ struct GameState
     int destroyedCount = 0;
     float survivalTime = 0.0f;
     float bestSurvivalTime = 0.0f;
-    bool isGameOver = false;
+    bool shouldQuit = false;
 };
 
 GameState CreateGameState();

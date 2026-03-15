@@ -3,33 +3,23 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/tuning.h"
 #include "world/world.h"
 
 namespace
 {
-constexpr float kPi = 3.1415926535f;
-constexpr float kMoveSharpness = 14.0f;
-constexpr float kTurnSpeed = 2.35f;
-constexpr float kTurnSharpness = 18.0f;
 constexpr float kMaxDeltaTime = 1.0f / 30.0f;
-constexpr float kPlayerFov = 66.0f * (kPi / 180.0f);
-constexpr float kPlayerInvulnerabilityDuration = 0.7f;
-constexpr float kPlayerDamageFlashRecovery = 4.5f;
-constexpr float kWeaponCooldown = 0.18f;
-constexpr float kWeaponRecoilRecovery = 7.5f;
-constexpr float kWeaponFlashRecovery = 12.0f;
-constexpr float kWeaponHitMarkerRecovery = 10.0f;
 
 float NormalizeAngle(float angle)
 {
     while (angle < 0.0f)
     {
-        angle += 2.0f * kPi;
+        angle += 2.0f * core::tuning::kPi;
     }
 
-    while (angle >= 2.0f * kPi)
+    while (angle >= 2.0f * core::tuning::kPi)
     {
-        angle -= 2.0f * kPi;
+        angle -= 2.0f * core::tuning::kPi;
     }
 
     return angle;
@@ -105,8 +95,9 @@ Player MakePlayer(Vector2 spawnPosition)
         Vector2{0.0f, 0.0f},
         0.0f,
         0.0f,
-        kPlayerFov,
-        kPlayerMaxHealth,
+        core::tuning::kPlayer.fovRadians,
+        core::tuning::kPlayer.maxHealth,
+        0.0f,
         0.0f,
         0.0f,
     };
@@ -122,11 +113,18 @@ WeaponState MakeWeaponState()
     };
 }
 
-void UpdatePlayer(Player& player, float deltaTime)
+void UpdatePlayerFeedback(Player& player, float deltaTime)
 {
     const float clampedDeltaTime = ClampDeltaTime(deltaTime);
     player.invulnerabilityTimer = std::max(0.0f, player.invulnerabilityTimer - clampedDeltaTime);
-    player.damageFlash = std::max(0.0f, player.damageFlash - (kPlayerDamageFlashRecovery * clampedDeltaTime));
+    player.damageFlash = std::max(0.0f, player.damageFlash - (core::tuning::kPlayer.damageFlashRecovery * clampedDeltaTime));
+    player.screenShake = std::max(0.0f, player.screenShake - (core::tuning::kPlayer.screenShakeRecovery * clampedDeltaTime));
+}
+
+void UpdatePlayer(Player& player, float deltaTime)
+{
+    const float clampedDeltaTime = ClampDeltaTime(deltaTime);
+    UpdatePlayerFeedback(player, clampedDeltaTime);
 
     float turnInput = 0.0f;
 
@@ -140,8 +138,8 @@ void UpdatePlayer(Player& player, float deltaTime)
         turnInput += 1.0f;
     }
 
-    const float targetTurnVelocity = turnInput * kTurnSpeed;
-    player.turnVelocity = SmoothValue(player.turnVelocity, targetTurnVelocity, kTurnSharpness, clampedDeltaTime);
+    const float targetTurnVelocity = turnInput * core::tuning::kPlayer.turnSpeed;
+    player.turnVelocity = SmoothValue(player.turnVelocity, targetTurnVelocity, core::tuning::kPlayer.turnSharpness, clampedDeltaTime);
     player.angle = NormalizeAngle(player.angle + (player.turnVelocity * clampedDeltaTime));
 
     const Vector2 forward = {std::cos(player.angle), std::sin(player.angle)};
@@ -174,10 +172,12 @@ void UpdatePlayer(Player& player, float deltaTime)
 
     const Vector2 movementDirection = Normalize(movementInput);
     const Vector2 targetVelocity = {
-        movementDirection.x * kMoveSpeed,
-        movementDirection.y * kMoveSpeed,
+        movementDirection.x * core::tuning::kPlayer.moveSpeed,
+        movementDirection.y * core::tuning::kPlayer.moveSpeed,
     };
-    const float moveSharpness = (LengthSquared(movementDirection) > 0.0f) ? kMoveSharpness : (kMoveSharpness * 1.5f);
+    const float moveSharpness = (LengthSquared(movementDirection) > 0.0f) ?
+        core::tuning::kPlayer.moveSharpness :
+        (core::tuning::kPlayer.moveSharpness * core::tuning::kPlayer.idleMoveSharpnessMultiplier);
 
     player.velocity = SmoothVector(player.velocity, targetVelocity, moveSharpness, clampedDeltaTime);
     const Vector2 movementStep = {
@@ -193,9 +193,9 @@ void UpdateWeapon(WeaponState& weapon, float deltaTime)
     const float clampedDeltaTime = ClampDeltaTime(deltaTime);
 
     weapon.shotCooldown = std::max(0.0f, weapon.shotCooldown - clampedDeltaTime);
-    weapon.recoil = std::max(0.0f, weapon.recoil - (kWeaponRecoilRecovery * clampedDeltaTime));
-    weapon.muzzleFlash = std::max(0.0f, weapon.muzzleFlash - (kWeaponFlashRecovery * clampedDeltaTime));
-    weapon.hitMarker = std::max(0.0f, weapon.hitMarker - (kWeaponHitMarkerRecovery * clampedDeltaTime));
+    weapon.recoil = std::max(0.0f, weapon.recoil - (core::tuning::kWeapon.recoilRecovery * clampedDeltaTime));
+    weapon.muzzleFlash = std::max(0.0f, weapon.muzzleFlash - (core::tuning::kWeapon.muzzleFlashRecovery * clampedDeltaTime));
+    weapon.hitMarker = std::max(0.0f, weapon.hitMarker - (core::tuning::kWeapon.hitMarkerRecovery * clampedDeltaTime));
 }
 
 bool TryFireWeapon(WeaponState& weapon)
@@ -207,9 +207,9 @@ bool TryFireWeapon(WeaponState& weapon)
         return false;
     }
 
-    weapon.shotCooldown = kWeaponCooldown;
-    weapon.recoil = 1.0f;
-    weapon.muzzleFlash = 1.0f;
+    weapon.shotCooldown = core::tuning::kWeapon.cooldown;
+    weapon.recoil = core::tuning::kWeapon.fireRecoil;
+    weapon.muzzleFlash = core::tuning::kWeapon.fireMuzzleFlash;
     return true;
 }
 
@@ -221,8 +221,9 @@ bool ApplyDamage(Player& player, int damage)
     }
 
     player.health = std::max(0, player.health - damage);
-    player.invulnerabilityTimer = kPlayerInvulnerabilityDuration;
+    player.invulnerabilityTimer = core::tuning::kPlayer.invulnerabilityDuration;
     player.damageFlash = 1.0f;
+    AddScreenShake(player, core::tuning::kPlayer.damageScreenShake);
 
     if (player.health == 0)
     {
@@ -231,5 +232,15 @@ bool ApplyDamage(Player& player, int damage)
     }
 
     return true;
+}
+
+void AddScreenShake(Player& player, float amount)
+{
+    if (amount <= 0.0f)
+    {
+        return;
+    }
+
+    player.screenShake = std::min(core::tuning::kPlayer.maxScreenShake, player.screenShake + amount);
 }
 } // namespace entities

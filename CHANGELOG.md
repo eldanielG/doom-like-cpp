@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+- Introduced lightweight enemy variants with typed spawns: fast low-health Scouts, baseline Standards, and heavier higher-damage Tanks.
+
+### Improved
+- Refined combat feel with firing and damage screen shake, stronger kill feedback, a clearer hit pulse, and tuned weapon recoil and muzzle flash presentation.
+- Split pause behavior into a quick `P` pause toggle and a real `Esc` pause menu with resume, restart, title, and quit actions.
+
 ## [v0.1.0] - 2026-03-15
 
 ### First Playable Combat Build

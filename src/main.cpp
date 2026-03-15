@@ -6,11 +6,12 @@ int main()
 {
     SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
     InitWindow(render::kScreenWidth, render::kScreenHeight, "doom-like-cpp");
+    SetExitKey(KEY_NULL);
     SetTargetFPS(60);
 
     core::GameState game = core::CreateGameState();
 
-    while (!WindowShouldClose())
+    while (!WindowShouldClose() && !game.shouldQuit)
     {
         core::UpdateGame(game, GetFrameTime());
 

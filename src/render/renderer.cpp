@@ -6,6 +6,8 @@
 #include <limits>
 #include <vector>
 
+#include "core/game.h"
+#include "core/tuning.h"
 #include "world/world.h"
 
 namespace
@@ -44,6 +46,21 @@ float Fract(float value)
     return value - std::floor(value);
 }
 
+float Clamp01(float value)
+{
+    return std::clamp(value, 0.0f, 1.0f);
+}
+
+struct TargetVisualStyle
+{
+    Color bodyColor;
+    Color ringColor;
+    Color coreColor;
+    Color projectileColor;
+    Color projectileCoreColor;
+    float projectileScale;
+};
+
 Color ScaleColor(Color color, float brightness)
 {
     const float clampedBrightness = std::clamp(brightness, 0.0f, 1.0f);
@@ -58,7 +75,7 @@ Color ScaleColor(Color color, float brightness)
 
 Color LerpColor(Color from, Color to, float amount)
 {
-    const float clampedAmount = std::clamp(amount, 0.0f, 1.0f);
+    const float clampedAmount = Clamp01(amount);
 
     return Color{
         static_cast<unsigned char>(static_cast<float>(from.r) + ((static_cast<float>(to.r) - static_cast<float>(from.r)) * clampedAmount)),
@@ -68,6 +85,41 @@ Color LerpColor(Color from, Color to, float amount)
     };
 }
 
+TargetVisualStyle GetTargetVisualStyle(entities::TargetType type)
+{
+    switch (type)
+    {
+    case entities::TargetType::Scout:
+        return TargetVisualStyle{
+            Color{126, 206, 236, 255},
+            Color{44, 116, 138, 255},
+            Color{18, 40, 48, 255},
+            Color{138, 228, 255, 230},
+            Color{238, 250, 255, 255},
+            0.82f,
+        };
+    case entities::TargetType::Tank:
+        return TargetVisualStyle{
+            Color{194, 116, 88, 255},
+            Color{116, 38, 30, 255},
+            Color{50, 18, 16, 255},
+            Color{255, 144, 96, 230},
+            Color{255, 232, 204, 255},
+            1.28f,
+        };
+    case entities::TargetType::Standard:
+    default:
+        return TargetVisualStyle{
+            Color{220, 214, 196, 255},
+            Color{150, 54, 42, 255},
+            Color{42, 18, 14, 255},
+            Color{255, 188, 96, 220},
+            Color{255, 244, 206, 255},
+            1.0f,
+        };
+    }
+}
+
 void BreakTime(float timeSeconds, int& minutes, int& seconds, int& tenths)
 {
     const float clampedTime = std::max(0.0f, timeSeconds);
@@ -75,6 +127,12 @@ void BreakTime(float timeSeconds, int& minutes, int& seconds, int& tenths)
     minutes = totalSeconds / 60;
     seconds = totalSeconds % 60;
     tenths = static_cast<int>(clampedTime * 10.0f) % 10;
+}
+
+void DrawCenteredText(const char* text, int centerY, int fontSize, Color color)
+{
+    const int textWidth = MeasureText(text, fontSize);
+    DrawText(text, (render::kScreenWidth - textWidth) / 2, centerY, fontSize, color);
 }
 
 Color ShadeWall(Color baseColor, float distance, bool hitOnVerticalSide)
@@ -203,29 +261,35 @@ void DrawTarget(
             return;
         }
 
-        const float burstSpread = outerRadius * (0.25f + ((1.0f - target.destroyFlash) * 0.9f));
-        const unsigned char alpha = static_cast<unsigned char>(220.0f * target.destroyFlash);
+        const float killPulse = Clamp01(target.destroyFlash);
+        const float burstSpread = outerRadius * (0.25f + ((1.0f - killPulse) * 0.9f));
+        const float shockRadius = outerRadius * (0.8f + ((1.0f - killPulse) * 1.4f));
+        const unsigned char alpha = static_cast<unsigned char>(220.0f * killPulse);
         const Color burstColor = {255, 164, 104, alpha};
         const Color emberColor = {255, 222, 178, alpha};
+        const Color shockColor = {255, 210, 156, static_cast<unsigned char>(180.0f * killPulse)};
 
         DrawCircle(screenX, centerY, outerRadius * 0.24f, emberColor);
         DrawCircle(screenX - static_cast<int>(burstSpread), centerY - static_cast<int>(burstSpread * 0.15f), outerRadius * 0.16f, burstColor);
         DrawCircle(screenX + static_cast<int>(burstSpread), centerY, outerRadius * 0.18f, burstColor);
         DrawCircle(screenX, centerY - static_cast<int>(burstSpread * 0.75f), outerRadius * 0.14f, emberColor);
+        DrawCircleLines(screenX, centerY, shockRadius, shockColor);
         DrawLine(screenX - static_cast<int>(outerRadius * 0.7f), centerY, screenX + static_cast<int>(outerRadius * 0.7f), centerY, burstColor);
+        DrawLine(screenX, centerY - static_cast<int>(outerRadius * 0.8f), screenX, centerY + static_cast<int>(outerRadius * 0.8f), burstColor);
         return;
     }
 
     const float reactionScale = 1.0f + (0.18f * target.hitReaction);
     const float reactionSquash = 1.0f - (0.12f * target.hitReaction);
     const int liftedCenterY = centerY - static_cast<int>(target.hitReaction * 12.0f);
-    const Color respawnBaseColor = LerpColor(Color{168, 214, 255, 255}, Color{220, 214, 196, 255}, 1.0f - target.respawnFlash);
+    const TargetVisualStyle style = GetTargetVisualStyle(target.type);
+    const Color respawnBaseColor = LerpColor(Color{168, 214, 255, 255}, style.bodyColor, 1.0f - target.respawnFlash);
     const Color boardColor = LerpColor(respawnBaseColor, Color{255, 132, 96, 255}, target.hitFlash);
-    const Color ringColor = LerpColor(Color{150, 54, 42, 255}, Color{255, 220, 170, 255}, target.hitFlash);
+    const Color ringColor = LerpColor(style.ringColor, Color{255, 220, 170, 255}, target.hitFlash);
 
     DrawEllipse(screenX, liftedCenterY, outerRadius * reactionScale, outerRadius * reactionSquash, boardColor);
     DrawEllipse(screenX, liftedCenterY, middleRadius * reactionScale, middleRadius * reactionSquash, ringColor);
-    DrawEllipse(screenX, liftedCenterY, innerRadius * reactionScale, innerRadius * reactionSquash, Color{42, 18, 14, 255});
+    DrawEllipse(screenX, liftedCenterY, innerRadius * reactionScale, innerRadius * reactionSquash, style.coreColor);
     DrawRectangle(screenX - (spriteSize / 16), liftedCenterY + (spriteSize / 2), spriteSize / 8, spriteSize / 2, Color{88, 66, 48, 255});
     DrawCircleLines(screenX, liftedCenterY, outerRadius * (1.02f + (target.hitFlash * 0.06f)), Color{255, 234, 198, 140});
 
@@ -288,14 +352,34 @@ void DrawProjectile(
     }
 
     const int screenY = render::kScreenHeight / 2;
-    const float projectileSize = std::clamp((static_cast<float>(render::kScreenHeight) * 0.12f) / perpendicularDistance, 5.0f, 18.0f);
-    DrawCircle(screenX, screenY, projectileSize, Color{255, 188, 96, 220});
-    DrawCircle(screenX, screenY, projectileSize * 0.45f, Color{255, 244, 206, 255});
+    const TargetVisualStyle style = GetTargetVisualStyle(target.type);
+    const float projectileSize = std::clamp(
+        ((static_cast<float>(render::kScreenHeight) * 0.12f) / perpendicularDistance) * style.projectileScale,
+        4.0f,
+        22.0f);
+    DrawCircle(screenX, screenY, projectileSize, style.projectileColor);
+    DrawCircle(screenX, screenY, projectileSize * 0.45f, style.projectileCoreColor);
 }
 } // namespace
 
 namespace render
 {
+Camera2D BuildGameplayCamera(const entities::Player& player)
+{
+    const float shake = Clamp01(player.screenShake);
+    const float time = static_cast<float>(GetTime());
+    const float shakeX = std::sin(time * 72.0f) * 7.0f * shake;
+    const float shakeY = std::cos(time * 93.0f) * 4.0f * shake;
+    const Vector2 screenCenter = {kScreenWidth * 0.5f, kScreenHeight * 0.5f};
+
+    Camera2D camera{};
+    camera.target = screenCenter;
+    camera.offset = {screenCenter.x + shakeX, screenCenter.y + shakeY};
+    camera.rotation = 0.0f;
+    camera.zoom = 1.0f;
+    return camera;
+}
+
 RayHit CastRay(Vector2 rayOrigin, Vector2 rayDirection)
 {
     const float epsilon = 0.0001f;
@@ -400,6 +484,8 @@ RayHit CastRay(Vector2 rayOrigin, Vector2 rayDirection)
 
 void DrawWorld(const entities::Player& player, std::vector<float>& depthBuffer)
 {
+    constexpr int kWorldOverscan = 16;
+
     if (depthBuffer.size() != kScreenWidth)
     {
         depthBuffer.assign(kScreenWidth, 0.0f);
@@ -407,8 +493,13 @@ void DrawWorld(const entities::Player& player, std::vector<float>& depthBuffer)
 
     const Color ceilingColor = {40, 42, 58, 255};
     const Color floorColor = {58, 36, 28, 255};
-    DrawRectangle(0, 0, kScreenWidth, kScreenHeight / 2, ceilingColor);
-    DrawRectangle(0, kScreenHeight / 2, kScreenWidth, kScreenHeight / 2, floorColor);
+    DrawRectangle(-kWorldOverscan, -kWorldOverscan, kScreenWidth + (kWorldOverscan * 2), (kScreenHeight / 2) + kWorldOverscan, ceilingColor);
+    DrawRectangle(
+        -kWorldOverscan,
+        kScreenHeight / 2,
+        kScreenWidth + (kWorldOverscan * 2),
+        (kScreenHeight / 2) + kWorldOverscan,
+        floorColor);
 
     const Vector2 forward = {std::cos(player.angle), std::sin(player.angle)};
     const float planeScale = std::tan(player.fov * 0.5f);
@@ -494,12 +585,15 @@ void DrawTargets(
 
 void DrawWeapon(const entities::Player& player, const entities::WeaponState& weapon)
 {
-    const float speedRatio = std::clamp(std::sqrt(LengthSquared(player.velocity)) / entities::kMoveSpeed, 0.0f, 1.0f);
+    const float speedRatio = std::clamp(
+        std::sqrt(LengthSquared(player.velocity)) / core::tuning::kPlayer.moveSpeed,
+        0.0f,
+        1.0f);
     const float bobTime = static_cast<float>(GetTime()) * 7.5f;
     const float bobX = std::sin(bobTime) * 12.0f * speedRatio;
     const float bobY = std::fabs(std::cos(bobTime * 0.5f)) * 10.0f * speedRatio;
-    const float recoilLift = weapon.recoil * 18.0f;
-    const float recoilShift = weapon.recoil * 4.0f;
+    const float recoilLift = weapon.recoil * 26.0f;
+    const float recoilShift = weapon.recoil * 7.0f;
 
     const int centerX = (kScreenWidth / 2) + static_cast<int>(bobX + recoilShift);
     const int baseY = kScreenHeight - 8 + static_cast<int>(bobY - recoilLift);
@@ -524,15 +618,23 @@ void DrawWeapon(const entities::Player& player, const entities::WeaponState& wea
 
     if (weapon.muzzleFlash > 0.0f)
     {
-        const float flashSize = 26.0f * weapon.muzzleFlash;
+        const float flashPulse = Clamp01(weapon.muzzleFlash);
+        const float flashSize = 34.0f * flashPulse;
         const int flashY = baseY - 162;
-        const Color flashColor = {255, 214, 128, static_cast<unsigned char>(180.0f * weapon.muzzleFlash)};
+        const Color flashColor = {255, 214, 128, static_cast<unsigned char>(200.0f * flashPulse)};
+        const Color flashGlow = {255, 190, 118, static_cast<unsigned char>(110.0f * flashPulse)};
 
         DrawTriangle(
             Vector2{static_cast<float>(centerX - flashSize), static_cast<float>(flashY + (flashSize * 0.35f))},
             Vector2{static_cast<float>(centerX), static_cast<float>(flashY - flashSize)},
             Vector2{static_cast<float>(centerX + flashSize), static_cast<float>(flashY + (flashSize * 0.35f))},
             flashColor);
+        DrawTriangle(
+            Vector2{static_cast<float>(centerX - (flashSize * 0.45f)), static_cast<float>(flashY - (flashSize * 0.1f))},
+            Vector2{static_cast<float>(centerX), static_cast<float>(flashY + flashSize)},
+            Vector2{static_cast<float>(centerX + (flashSize * 0.45f)), static_cast<float>(flashY - (flashSize * 0.1f))},
+            flashGlow);
+        DrawCircle(centerX, flashY, flashSize * 0.95f, flashGlow);
         DrawCircle(centerX, flashY, flashSize * 0.45f, Color{255, 246, 214, 220});
     }
 }
@@ -575,8 +677,9 @@ void DrawMiniMap(const entities::Player& player, const std::array<entities::Targ
             continue;
         }
 
+        const TargetVisualStyle style = GetTargetVisualStyle(target.type);
         const Color targetColor = LerpColor(
-            LerpColor(Color{168, 214, 255, 255}, Color{232, 198, 92, 255}, 1.0f - target.respawnFlash),
+            LerpColor(Color{168, 214, 255, 255}, style.bodyColor, 1.0f - target.respawnFlash),
             Color{255, 120, 92, 255},
             target.hitFlash);
         DrawCircle(targetX, targetY, 5.0f, targetColor);
@@ -624,9 +727,12 @@ void DrawHud(
     DrawText(TextFormat("FPS %03i", GetFPS()), hudX + 12, hudY + 10, 20, primaryTextColor);
     DrawText(TextFormat("POS %.1f %.1f", player.position.x, player.position.y), hudX + 12, hudY + 34, 18, secondaryTextColor);
 
-    const float healthRatio = std::clamp(static_cast<float>(player.health) / static_cast<float>(entities::kPlayerMaxHealth), 0.0f, 1.0f);
+    const float healthRatio = std::clamp(
+        static_cast<float>(player.health) / static_cast<float>(core::tuning::kPlayer.maxHealth),
+        0.0f,
+        1.0f);
     const Color healthColor = LerpColor(Color{196, 62, 62, 255}, Color{114, 214, 132, 255}, healthRatio);
-    DrawText(TextFormat("HP %03i / %03i", player.health, entities::kPlayerMaxHealth), hudX + 12, hudY + 56, 18, primaryTextColor);
+    DrawText(TextFormat("HP %03i / %03i", player.health, core::tuning::kPlayer.maxHealth), hudX + 12, hudY + 56, 18, primaryTextColor);
     DrawRectangle(hudX + 12, hudY + 80, kHudWidth - 24, 10, Color{34, 18, 20, 255});
     DrawRectangle(hudX + 13, hudY + 81, static_cast<int>(static_cast<float>(kHudWidth - 26) * healthRatio), 8, healthColor);
     DrawText(TextFormat("SCORE %04i | BEST %04i", score, bestScore), hudX + 12, hudY + 96, 18, secondaryTextColor);
@@ -637,30 +743,36 @@ void DrawHud(
 
     if (player.damageFlash > 0.0f)
     {
+        constexpr int kOverlayOverscan = 24;
         const Color damageOverlay = {120, 18, 18, static_cast<unsigned char>(70.0f * player.damageFlash)};
-        DrawRectangle(0, 0, kScreenWidth, kScreenHeight, damageOverlay);
+        DrawRectangle(-kOverlayOverscan, -kOverlayOverscan, kScreenWidth + (kOverlayOverscan * 2), kScreenHeight + (kOverlayOverscan * 2), damageOverlay);
     }
 
     const char* controlsText = isGameOver ?
-        "Game over | R restart" :
-        "WASD move | arrows turn | mouse1/space fire | R reset";
+        "Game over | R/Enter/Space restart | Esc title" :
+        "WASD move | arrows turn | mouse1/space fire | P toggle pause | Esc pause menu | R reset";
     DrawText(controlsText, 16, kScreenHeight - 28, 18, Color{220, 220, 220, 190});
 
     const int crosshairX = kScreenWidth / 2;
     const int crosshairY = kScreenHeight / 2;
-    const Color crosshairColor = LerpColor(Color{240, 236, 220, 180}, Color{255, 158, 120, 255}, weapon.hitMarker);
-    DrawLine(crosshairX - 9, crosshairY, crosshairX - 3, crosshairY, crosshairColor);
-    DrawLine(crosshairX + 3, crosshairY, crosshairX + 9, crosshairY, crosshairColor);
-    DrawLine(crosshairX, crosshairY - 9, crosshairX, crosshairY - 3, crosshairColor);
-    DrawLine(crosshairX, crosshairY + 3, crosshairX, crosshairY + 9, crosshairColor);
+    const float hitPulse = Clamp01(weapon.hitMarker);
+    const int crosshairGap = 3 + static_cast<int>(hitPulse * 2.0f);
+    const int crosshairArm = 6 + static_cast<int>(hitPulse * 6.0f);
+    const Color crosshairColor = LerpColor(Color{240, 236, 220, 180}, Color{255, 158, 120, 255}, hitPulse);
+    DrawLine(crosshairX - (crosshairGap + crosshairArm), crosshairY, crosshairX - crosshairGap, crosshairY, crosshairColor);
+    DrawLine(crosshairX + crosshairGap, crosshairY, crosshairX + crosshairGap + crosshairArm, crosshairY, crosshairColor);
+    DrawLine(crosshairX, crosshairY - (crosshairGap + crosshairArm), crosshairX, crosshairY - crosshairGap, crosshairColor);
+    DrawLine(crosshairX, crosshairY + crosshairGap, crosshairX, crosshairY + crosshairGap + crosshairArm, crosshairColor);
 
     if (weapon.hitMarker > 0.0f)
     {
         const int markerSpread = 16 + static_cast<int>((1.0f - weapon.hitMarker) * 6.0f);
+        const float pulseRadius = 8.0f + ((1.0f - hitPulse) * 12.0f);
         DrawLine(crosshairX - markerSpread, crosshairY - markerSpread, crosshairX - 6, crosshairY - 6, crosshairColor);
         DrawLine(crosshairX + markerSpread, crosshairY - markerSpread, crosshairX + 6, crosshairY - 6, crosshairColor);
         DrawLine(crosshairX - markerSpread, crosshairY + markerSpread, crosshairX - 6, crosshairY + 6, crosshairColor);
         DrawLine(crosshairX + markerSpread, crosshairY + markerSpread, crosshairX + 6, crosshairY + 6, crosshairColor);
+        DrawCircleLines(crosshairX, crosshairY, pulseRadius, Color{255, 220, 186, static_cast<unsigned char>(160.0f * hitPulse)});
     }
 
     if (isGameOver)
@@ -681,7 +793,68 @@ void DrawHud(
             bestMinutes,
             bestSeconds,
             bestTenths), boxX + 24, boxY + 96, 22, Color{220, 214, 206, 255});
-        DrawText("Pressione R para reiniciar", boxX + 50, boxY + 126, 22, Color{220, 214, 206, 255});
+        DrawText("Press R, Enter or Space | Esc title", boxX + 20, boxY + 126, 22, Color{220, 214, 206, 255});
     }
+}
+
+void DrawTitleOverlay()
+{
+    DrawRectangle(0, 0, kScreenWidth, kScreenHeight, Color{8, 10, 16, 165});
+    DrawRectangle((kScreenWidth / 2) - 260, (kScreenHeight / 2) - 122, 520, 244, Color{12, 14, 20, 220});
+    DrawRectangleLines((kScreenWidth / 2) - 260, (kScreenHeight / 2) - 122, 520, 244, Color{118, 124, 138, 230});
+    DrawCenteredText("DOOM-LIKE CPP", (kScreenHeight / 2) - 74, 42, Color{238, 232, 220, 255});
+    DrawCenteredText("Retro FPS Prototype in C++ and raylib", (kScreenHeight / 2) - 18, 22, Color{190, 198, 210, 255});
+    DrawCenteredText("Press any key to start", (kScreenHeight / 2) + 38, 24, Color{255, 194, 128, 255});
+    DrawCenteredText("WASD move  |  Arrows turn  |  Mouse1 / Space fire", (kScreenHeight / 2) + 78, 20, Color{214, 214, 214, 220});
+    DrawCenteredText("Esc quits from title", (kScreenHeight / 2) + 108, 18, Color{202, 208, 218, 220});
+}
+
+void DrawPauseOverlay(core::PauseMode pauseMode, int selectedOption)
+{
+    DrawRectangle(0, 0, kScreenWidth, kScreenHeight, Color{8, 10, 16, 120});
+    if (pauseMode == core::PauseMode::Quick)
+    {
+        DrawRectangle((kScreenWidth / 2) - 200, (kScreenHeight / 2) - 72, 400, 144, Color{12, 14, 20, 220});
+        DrawRectangleLines((kScreenWidth / 2) - 200, (kScreenHeight / 2) - 72, 400, 144, Color{118, 124, 138, 230});
+        DrawCenteredText("PAUSED", (kScreenHeight / 2) - 36, 36, Color{238, 232, 220, 255});
+        DrawCenteredText("Press P to resume", (kScreenHeight / 2) + 8, 24, Color{255, 194, 128, 255});
+        DrawCenteredText("Press Esc to open the pause menu", (kScreenHeight / 2) + 42, 18, Color{202, 208, 218, 220});
+        return;
+    }
+
+    constexpr std::array<const char*, 4> kMenuOptions = {{
+        "Resume",
+        "Restart",
+        "Quit to Title",
+        "Quit Game",
+    }};
+
+    const int panelX = (kScreenWidth / 2) - 220;
+    const int panelY = (kScreenHeight / 2) - 134;
+    const int panelWidth = 440;
+    const int panelHeight = 268;
+
+    DrawRectangle(panelX, panelY, panelWidth, panelHeight, Color{12, 14, 20, 228});
+    DrawRectangleLines(panelX, panelY, panelWidth, panelHeight, Color{118, 124, 138, 230});
+    DrawCenteredText("PAUSE MENU", panelY + 22, 36, Color{238, 232, 220, 255});
+
+    for (int optionIndex = 0; optionIndex < static_cast<int>(kMenuOptions.size()); ++optionIndex)
+    {
+        const bool isSelected = optionIndex == selectedOption;
+        const int optionX = panelX + 42;
+        const int optionY = panelY + 78 + (optionIndex * 36);
+        const int optionWidth = panelWidth - 84;
+        const int optionHeight = 28;
+        const Color fillColor = isSelected ? Color{120, 82, 44, 220} : Color{24, 28, 36, 170};
+        const Color borderColor = isSelected ? Color{255, 204, 132, 255} : Color{78, 86, 100, 210};
+        const Color textColor = isSelected ? Color{255, 242, 220, 255} : Color{212, 216, 224, 255};
+
+        DrawRectangle(optionX, optionY, optionWidth, optionHeight, fillColor);
+        DrawRectangleLines(optionX, optionY, optionWidth, optionHeight, borderColor);
+        DrawText(kMenuOptions[static_cast<std::size_t>(optionIndex)], optionX + 12, optionY + 5, 20, textColor);
+    }
+
+    DrawCenteredText("Up/Down or W/S navigate", panelY + 226, 18, Color{202, 208, 218, 220});
+    DrawCenteredText("Enter/Space confirm | Esc or P resume", panelY + 248, 18, Color{202, 208, 218, 220});
 }
 } // namespace render

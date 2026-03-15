@@ -7,6 +7,11 @@
 #include "entities/target.h"
 #include "raylib.h"
 
+namespace core
+{
+enum class PauseMode : unsigned char;
+}
+
 namespace render
 {
 constexpr int kScreenWidth = 1280;
@@ -21,6 +26,7 @@ struct RayHit
     bool hitOnVerticalSide;
 };
 
+Camera2D BuildGameplayCamera(const entities::Player& player);
 RayHit CastRay(Vector2 rayOrigin, Vector2 rayDirection);
 void DrawWorld(const entities::Player& player, std::vector<float>& depthBuffer);
 void DrawTargets(
@@ -41,4 +47,6 @@ void DrawHud(
     float survivalTime,
     float bestSurvivalTime,
     bool isGameOver);
+void DrawTitleOverlay();
+void DrawPauseOverlay(core::PauseMode pauseMode, int selectedOption);
 } // namespace render

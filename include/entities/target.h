@@ -9,6 +9,13 @@ namespace entities
 {
 constexpr int kTargetCount = 3;
 
+enum class TargetType : unsigned char
+{
+    Scout,
+    Standard,
+    Tank,
+};
+
 struct Target
 {
     Vector2 position;
@@ -29,6 +36,7 @@ struct Target
     float moveSpeed;
     int health;
     int spawnIndex;
+    TargetType type;
     bool projectileActive;
     bool chasingPlayer;
     bool movingToPatrolEnd;

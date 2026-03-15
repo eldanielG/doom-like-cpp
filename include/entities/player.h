@@ -4,9 +4,6 @@
 
 namespace entities
 {
-constexpr float kMoveSpeed = 3.4f;
-constexpr int kPlayerMaxHealth = 100;
-
 struct Player
 {
     Vector2 position;
@@ -17,6 +14,7 @@ struct Player
     int health;
     float invulnerabilityTimer;
     float damageFlash;
+    float screenShake;
 };
 
 struct WeaponState
@@ -29,8 +27,10 @@ struct WeaponState
 
 Player MakePlayer(Vector2 spawnPosition);
 WeaponState MakeWeaponState();
+void UpdatePlayerFeedback(Player& player, float deltaTime);
 void UpdatePlayer(Player& player, float deltaTime);
 void UpdateWeapon(WeaponState& weapon, float deltaTime);
 bool TryFireWeapon(WeaponState& weapon);
 bool ApplyDamage(Player& player, int damage);
+void AddScreenShake(Player& player, float amount);
 } // namespace entities

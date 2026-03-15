@@ -2,6 +2,10 @@
 
 #include <array>
 #include <cmath>
+#include <fstream>
+#include <string>
+
+#include "entities/target.h"
 
 namespace
 {
@@ -14,20 +18,26 @@ const std::array<Vector2, world::kPlayerSpawnPointCount> kPlayerSpawnPoints = {{
     {9.5f, 9.5f},
 }};
 
-const std::array<Vector2, world::kTargetSpawnPointCount> kTargetSpawnPoints = {{
-    {1.5f, 1.5f},
-    {5.5f, 1.5f},
-    {9.5f, 1.5f},
-    {1.5f, 3.5f},
-    {7.5f, 3.5f},
-    {3.5f, 5.5f},
-    {8.5f, 5.5f},
-    {5.5f, 7.5f},
-    {1.5f, 9.5f},
-    {9.5f, 9.5f},
+const std::array<world::TargetSpawnPoint, world::kTargetSpawnPointCount> kTargetSpawnPoints = {{
+    {{1.5f, 1.5f}, entities::TargetType::Scout},
+    {{5.5f, 1.5f}, entities::TargetType::Standard},
+    {{9.5f, 1.5f}, entities::TargetType::Scout},
+    {{1.5f, 3.5f}, entities::TargetType::Standard},
+    {{7.5f, 3.5f}, entities::TargetType::Tank},
+    {{3.5f, 5.5f}, entities::TargetType::Standard},
+    {{8.5f, 5.5f}, entities::TargetType::Scout},
+    {{5.5f, 7.5f}, entities::TargetType::Tank},
+    {{1.5f, 9.5f}, entities::TargetType::Scout},
+    {{9.5f, 9.5f}, entities::TargetType::Standard},
 }};
 
-const world::Map kMap = {{
+constexpr std::array<const char*, 3> kMapFilePaths = {{
+    "assets/maps/arena.txt",
+    "../assets/maps/arena.txt",
+    "../../assets/maps/arena.txt",
+}};
+
+const world::Map kFallbackMap = {{
     {{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
     {{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}},
     {{1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1}},
@@ -46,13 +56,90 @@ int CellFromWorld(float value)
 {
     return static_cast<int>(std::floor(value));
 }
+
+bool ParseMapRow(const std::string& line, world::TileRow& row)
+{
+    if (line.size() != world::kMapWidth)
+    {
+        return false;
+    }
+
+    for (int column = 0; column < world::kMapWidth; ++column)
+    {
+        const char tile = line[static_cast<std::size_t>(column)];
+
+        if (tile != '0' && tile != '1')
+        {
+            return false;
+        }
+
+        row[static_cast<std::size_t>(column)] = tile - '0';
+    }
+
+    return true;
+}
+
+world::Map LoadMapFromFile()
+{
+    for (const char* filePath : kMapFilePaths)
+    {
+        std::ifstream mapFile(filePath);
+        if (!mapFile.is_open())
+        {
+            continue;
+        }
+
+        world::Map loadedMap{};
+        std::string line;
+        int row = 0;
+
+        while (std::getline(mapFile, line))
+        {
+            if (!line.empty() && line.back() == '\r')
+            {
+                line.pop_back();
+            }
+
+            if (line.empty())
+            {
+                continue;
+            }
+
+            if (row >= world::kMapHeight || !ParseMapRow(line, loadedMap[static_cast<std::size_t>(row)]))
+            {
+                TraceLog(LOG_WARNING, "Invalid map layout in %s. Falling back to the built-in map.", filePath);
+                return kFallbackMap;
+            }
+
+            ++row;
+        }
+
+        if (row != world::kMapHeight)
+        {
+            TraceLog(LOG_WARNING, "Incomplete map layout in %s. Falling back to the built-in map.", filePath);
+            return kFallbackMap;
+        }
+
+        TraceLog(LOG_INFO, "Loaded map layout from %s", filePath);
+        return loadedMap;
+    }
+
+    TraceLog(LOG_WARNING, "Map file not found. Falling back to the built-in map.");
+    return kFallbackMap;
+}
+
+const world::Map& GetLoadedMap()
+{
+    static const world::Map loadedMap = LoadMapFromFile();
+    return loadedMap;
+}
 } // namespace
 
 namespace world
 {
 const Map& GetMap()
 {
-    return kMap;
+    return GetLoadedMap();
 }
 
 const std::array<Vector2, kPlayerSpawnPointCount>& GetPlayerSpawnPoints()
@@ -60,7 +147,7 @@ const std::array<Vector2, kPlayerSpawnPointCount>& GetPlayerSpawnPoints()
     return kPlayerSpawnPoints;
 }
 
-const std::array<Vector2, kTargetSpawnPointCount>& GetTargetSpawnPoints()
+const std::array<TargetSpawnPoint, kTargetSpawnPointCount>& GetTargetSpawnPoints()
 {
     return kTargetSpawnPoints;
 }
@@ -72,7 +159,7 @@ bool IsWall(int mapX, int mapY)
         return true;
     }
 
-    return kMap[mapY][mapX] != 0;
+    return GetMap()[static_cast<std::size_t>(mapY)][static_cast<std::size_t>(mapX)] != 0;
 }
 
 bool CanMoveTo(Vector2 position)
