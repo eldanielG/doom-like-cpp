@@ -161,6 +161,7 @@ void SpawnTarget(entities::Target& target, int spawnIndex)
     target.respawnTimer = 0.0f;
     target.respawnFlash = 1.0f;
     target.shootCooldown = core::tuning::kEnemy.initialShootCooldown;
+    target.spawnAttackGraceTimer = core::tuning::kEnemy.respawnAttackGraceDuration;
     target.attackFlash = 0.0f;
     target.chaseVisibilityGraceTimer = 0.0f;
     target.moveSpeed = archetype.patrolMoveSpeed;
@@ -286,7 +287,7 @@ bool HasLineOfSightToPlayer(
     return wallHit.distance + world::kPlayerRadius >= playerDistance;
 }
 
-void FireProjectile(entities::Target& target, Vector2 direction)
+void FireProjectile(entities::Target& target, Vector2 direction, const core::tuning::EnemyDifficultyTuning& difficulty)
 {
     const core::tuning::EnemyVariantTuning archetype = core::tuning::GetEnemyVariantTuning(target.type);
     target.projectileActive = true;
@@ -295,7 +296,7 @@ void FireProjectile(entities::Target& target, Vector2 direction)
         direction.x * archetype.projectileSpeed,
         direction.y * archetype.projectileSpeed,
     };
-    target.shootCooldown = archetype.attackCooldown;
+    target.shootCooldown = archetype.attackCooldown * difficulty.attackCooldownMultiplier;
     target.attackFlash = 1.0f;
 }
 
@@ -375,6 +376,7 @@ Target MakeTarget(Vector2 spawnPosition)
         0.0f,
         0.0f,
         0.0f,
+        0.0f,
         core::tuning::GetEnemyVariantTuning(TargetType::Standard).patrolMoveSpeed,
         core::tuning::GetEnemyVariantTuning(TargetType::Standard).maxHealth,
         -1,
@@ -419,6 +421,7 @@ void UpdateTarget(Target& target, Player& player, float deltaTime, int difficult
     }
 
     target.shootCooldown = std::max(0.0f, target.shootCooldown - clampedDeltaTime);
+    target.spawnAttackGraceTimer = std::max(0.0f, target.spawnAttackGraceTimer - clampedDeltaTime);
     target.chaseVisibilityGraceTimer = std::max(0.0f, target.chaseVisibilityGraceTimer - clampedDeltaTime);
 
     const Vector2 toPlayer = {
@@ -460,9 +463,10 @@ void UpdateTarget(Target& target, Player& player, float deltaTime, int difficult
         float playerDistance = 0.0f;
         Vector2 toPlayerDirection = {0.0f, 0.0f};
         if (HasLineOfSightToPlayer(target, player, core::tuning::kEnemy.attackRange, playerDistance, toPlayerDirection) &&
-            target.shootCooldown <= 0.0f)
+            target.shootCooldown <= 0.0f &&
+            target.spawnAttackGraceTimer <= 0.0f)
         {
-            FireProjectile(target, toPlayerDirection);
+            FireProjectile(target, toPlayerDirection, difficulty);
         }
     }
 
@@ -548,14 +552,13 @@ void HandleTargetRespawns(const Player& player, std::array<Target, kTargetCount>
     }
 }
 
-bool TryHitTargets(
+TargetHitResult TryHitTargets(
     const Player& player,
     std::array<Target, kTargetCount>& targets,
     int& hitCount,
     int& destroyedCount,
     int difficultyLevel)
 {
-    const core::tuning::EnemyDifficultyTuning difficulty = core::tuning::GetEnemyDifficultyTuning(difficultyLevel);
     int bestTargetIndex = -1;
     float bestTargetDistance = std::numeric_limits<float>::max();
 
@@ -577,10 +580,13 @@ bool TryHitTargets(
 
     if (bestTargetIndex < 0)
     {
-        return false;
+        return TargetHitResult{};
     }
 
     Target& target = targets[bestTargetIndex];
+    TargetHitResult result{};
+    result.hit = true;
+    result.type = target.type;
     target.health = std::max(0, target.health - core::tuning::kWeapon.damagePerShot);
     target.hitFlash = 1.0f;
     target.hitReaction = 1.0f;
@@ -588,14 +594,18 @@ bool TryHitTargets(
 
     if (target.health == 0)
     {
+        const core::tuning::EnemyDifficultyTuning difficulty = core::tuning::GetEnemyDifficultyTuning(difficultyLevel);
         target.destroyed = true;
         target.destroyFlash = 1.0f;
         target.respawnTimer = difficulty.respawnDelay;
         target.respawnFlash = 0.0f;
+        target.spawnAttackGraceTimer = 0.0f;
         ++destroyedCount;
+        result.destroyed = true;
+        result.scoreDelta = core::tuning::GetEliminationScore(target.type, difficultyLevel);
     }
 
-    return true;
+    return result;
 }
 
 bool TryDamagePlayerFromTargets(Player& player, const std::array<Target, kTargetCount>& targets)

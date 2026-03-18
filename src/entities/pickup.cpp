@@ -113,12 +113,12 @@ PickupCollectionResult TryCollectPickups(Player& player, WeaponState& weapon, st
             result.rapidFireActivated = true;
             break;
         case PickupType::ScoreBonus:
-            result.scoreDelta = core::tuning::kPickup.scoreBonus;
+            result.scoreDelta = core::tuning::GetPickupScoreBonus(pickup.type);
             break;
         }
 
         pickup.active = false;
-        pickup.respawnTimer = core::tuning::kPickup.respawnDelay;
+        pickup.respawnTimer = core::tuning::GetPickupRespawnDelay(pickup.type);
         result.collected = true;
         result.type = pickup.type;
         return result;

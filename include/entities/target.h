@@ -31,6 +31,7 @@ struct Target
     float respawnTimer;
     float respawnFlash;
     float shootCooldown;
+    float spawnAttackGraceTimer;
     float attackFlash;
     float chaseVisibilityGraceTimer;
     float moveSpeed;
@@ -43,11 +44,19 @@ struct Target
     bool destroyed;
 };
 
+struct TargetHitResult
+{
+    bool hit = false;
+    bool destroyed = false;
+    TargetType type = TargetType::Standard;
+    int scoreDelta = 0;
+};
+
 Target MakeTarget(Vector2 spawnPosition);
 std::array<Target, kTargetCount> MakeTargets(const Player& player);
 void UpdateTarget(Target& target, Player& player, float deltaTime, int difficultyLevel);
 void HandleTargetRespawns(const Player& player, std::array<Target, kTargetCount>& targets, float deltaTime);
-bool TryHitTargets(
+TargetHitResult TryHitTargets(
     const Player& player,
     std::array<Target, kTargetCount>& targets,
     int& hitCount,

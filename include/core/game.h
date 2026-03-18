@@ -16,6 +16,7 @@ enum class GamePhase : unsigned char
     Gameplay,
     Pause,
     GameOver,
+    Victory,
 };
 
 enum class PauseMode : unsigned char
@@ -38,12 +39,15 @@ struct GameState
     int difficultyLevel = 1;
     int score = 0;
     int bestScore = 0;
+    int currentScoreStage = 1;
     int hitCount = 0;
     int destroyedCount = 0;
     float survivalTime = 0.0f;
     float bestSurvivalTime = 0.0f;
     const char* pickupMessage = nullptr;
     float pickupMessageTimer = 0.0f;
+    float stageAdvanceTimer = 0.0f;
+    bool gameplayCursorHidden = false;
     bool shouldQuit = false;
 };
 

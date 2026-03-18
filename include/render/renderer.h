@@ -47,6 +47,10 @@ void DrawHud(
     const entities::Player& player,
     const entities::WeaponState& weapon,
     int difficultyLevel,
+    int currentScoreStage,
+    int totalScoreStages,
+    int currentStageTargetScore,
+    int scoreToNextStage,
     int score,
     int bestScore,
     int hitCount,
@@ -56,7 +60,10 @@ void DrawHud(
     float bestSurvivalTime,
     const char* pickupMessage,
     float pickupMessageTimer,
-    bool isGameOver);
-void DrawTitleOverlay();
+    float stageAdvanceTimer,
+    bool isGameOver,
+    bool isVictory);
+void DrawTitleOverlay(const char* levelName, int levelIndex, int levelCount);
 void DrawPauseOverlay(core::PauseMode pauseMode, int selectedOption);
+void DrawVictoryOverlay(int score, int bestScore, float survivalTime, float bestSurvivalTime, int totalScoreStages);
 } // namespace render

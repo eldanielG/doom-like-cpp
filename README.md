@@ -35,7 +35,7 @@ structure without prematurely expanding into a full engine or a full DOOM clone.
 | --- | --- |
 | Move | `W`, `A`, `S`, `D` |
 | Turn camera | `Left Arrow`, `Right Arrow` |
-| Fire | `Mouse Left`, `Space` |
+| Fire | `Hold Mouse Left` / `Hold Space` |
 | Reset run | `R` |
 | Quit | `Esc` / window close |
 

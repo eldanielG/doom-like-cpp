@@ -36,6 +36,24 @@ struct PickupSpawnPoint
     entities::PickupType type;
 };
 
+struct LevelDefinition
+{
+    const char* id;
+    const char* displayName;
+    Map map;
+    std::array<Vector2, kPlayerSpawnPointCount> playerSpawns;
+    std::array<TargetSpawnPoint, kTargetSpawnPointCount> targetSpawns;
+    std::array<PickupSpawnPoint, kPickupSpawnPointCount> pickupSpawns;
+};
+
+constexpr int kLevelCount = 2;
+
+int GetLevelCount();
+int GetCurrentLevelIndex();
+const char* GetCurrentLevelDisplayName();
+const LevelDefinition& GetCurrentLevel();
+void SetCurrentLevel(int levelIndex);
+void CycleCurrentLevel(int direction);
 const Map& GetMap();
 const std::array<Vector2, kPlayerSpawnPointCount>& GetPlayerSpawnPoints();
 const std::array<TargetSpawnPoint, kTargetSpawnPointCount>& GetTargetSpawnPoints();

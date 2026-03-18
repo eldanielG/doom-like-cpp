@@ -139,8 +139,11 @@ void UpdatePlayer(Player& player, float deltaTime)
         turnInput += 1.0f;
     }
 
-    const float targetTurnVelocity = turnInput * core::tuning::kPlayer.turnSpeed;
-    player.turnVelocity = SmoothValue(player.turnVelocity, targetTurnVelocity, core::tuning::kPlayer.turnSharpness, clampedDeltaTime);
+    const float targetTurnVelocity = turnInput * core::tuning::kPlayer.keyboardTurnSpeed;
+    const float turnSharpness = (turnInput == 0.0f) ?
+        (core::tuning::kPlayer.keyboardTurnSharpness * core::tuning::kPlayer.keyboardTurnReleaseSharpnessMultiplier) :
+        core::tuning::kPlayer.keyboardTurnSharpness;
+    player.turnVelocity = SmoothValue(player.turnVelocity, targetTurnVelocity, turnSharpness, clampedDeltaTime);
     player.angle = NormalizeAngle(player.angle + (player.turnVelocity * clampedDeltaTime));
 
     const Vector2 forward = {std::cos(player.angle), std::sin(player.angle)};
@@ -202,7 +205,7 @@ void UpdateWeapon(WeaponState& weapon, float deltaTime)
 
 bool TryFireWeapon(WeaponState& weapon)
 {
-    const bool firePressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsKeyPressed(KEY_SPACE);
+    const bool firePressed = IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsKeyDown(KEY_SPACE);
 
     if (!firePressed || weapon.shotCooldown > 0.0f)
     {

@@ -30,9 +30,19 @@ bool IsMenuBackKeyPressed()
     return IsKeyPressed(KEY_ESCAPE);
 }
 
+bool IsTitlePreviousLevelKeyPressed()
+{
+    return IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A);
+}
+
+bool IsTitleNextLevelKeyPressed()
+{
+    return IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D);
+}
+
 bool IsTitleStartKeyPressed()
 {
-    return GetKeyPressed() != 0;
+    return IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
 
 bool IsRestartKeyPressed()
@@ -40,11 +50,33 @@ bool IsRestartKeyPressed()
     return IsKeyPressed(KEY_R) || IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE);
 }
 
+void SyncCursorVisibility(GameState& game)
+{
+    const bool shouldHideCursor = game.phase == GamePhase::Gameplay;
+
+    if (shouldHideCursor == game.gameplayCursorHidden)
+    {
+        return;
+    }
+
+    if (shouldHideCursor)
+    {
+        HideCursor();
+    }
+    else
+    {
+        ShowCursor();
+    }
+
+    game.gameplayCursorHidden = shouldHideCursor;
+}
+
 void ResumeGameplay(GameState& game)
 {
     game.phase = GamePhase::Gameplay;
     game.pauseMode = PauseMode::Quick;
     game.pauseMenuSelection = PauseOptionResume;
+    SyncCursorVisibility(game);
 }
 
 void OpenQuickPause(GameState& game)
@@ -52,6 +84,7 @@ void OpenQuickPause(GameState& game)
     game.phase = GamePhase::Pause;
     game.pauseMode = PauseMode::Quick;
     game.pauseMenuSelection = PauseOptionResume;
+    SyncCursorVisibility(game);
 }
 
 void OpenPauseMenu(GameState& game)
@@ -59,6 +92,7 @@ void OpenPauseMenu(GameState& game)
     game.phase = GamePhase::Pause;
     game.pauseMode = PauseMode::Menu;
     game.pauseMenuSelection = PauseOptionResume;
+    SyncCursorVisibility(game);
 }
 
 void ReturnToTitle(GameState& game)
@@ -66,11 +100,37 @@ void ReturnToTitle(GameState& game)
     game.phase = GamePhase::Title;
     game.pauseMode = PauseMode::Quick;
     game.pauseMenuSelection = PauseOptionResume;
+    SyncCursorVisibility(game);
 }
 
 void StartGameplay(GameState& game)
 {
     ResetGame(game);
+}
+
+void AdvanceScoreStage(GameState& game)
+{
+    ++game.currentScoreStage;
+    game.stageAdvanceTimer = tuning::kRun.stageAdvanceFeedbackDuration;
+
+    if (game.currentScoreStage > tuning::kRun.totalScoreStages)
+    {
+        game.phase = GamePhase::Victory;
+        SyncCursorVisibility(game);
+        return;
+    }
+
+    game.difficultyLevel = std::max(game.difficultyLevel, tuning::GetStageDifficultyFloor(game.currentScoreStage));
+}
+
+void TryAdvanceProgression(GameState& game)
+{
+    while (game.phase == GamePhase::Gameplay &&
+           game.currentScoreStage <= tuning::kRun.totalScoreStages &&
+           game.score >= tuning::GetScoreStageTarget(game.currentScoreStage))
+    {
+        AdvanceScoreStage(game);
+    }
 }
 
 void ActivatePauseMenuSelection(GameState& game)
@@ -102,11 +162,18 @@ GameState CreateGameState()
     game.depthBuffer.assign(render::kScreenWidth, 0.0f);
     ResetGame(game);
     game.phase = GamePhase::Title;
+    SyncCursorVisibility(game);
     return game;
 }
 
 void DestroyGameState(GameState& game)
 {
+    if (game.gameplayCursorHidden)
+    {
+        ShowCursor();
+        game.gameplayCursorHidden = false;
+    }
+
     ShutdownAudio(game.audio);
 }
 
@@ -123,14 +190,18 @@ void ResetGame(GameState& game)
     game.targets = entities::MakeTargets(game.player);
     game.difficultyLevel = 1;
     game.score = 0;
+    game.currentScoreStage = 1;
     game.hitCount = 0;
     game.destroyedCount = 0;
     game.survivalTime = 0.0f;
     game.pickupMessage = nullptr;
     game.pickupMessageTimer = 0.0f;
+    game.stageAdvanceTimer = tuning::kRun.stageAdvanceFeedbackDuration;
     game.pauseMode = PauseMode::Quick;
     game.pauseMenuSelection = PauseOptionResume;
     game.phase = GamePhase::Gameplay;
+    game.difficultyLevel = tuning::GetStageDifficultyFloor(game.currentScoreStage);
+    SyncCursorVisibility(game);
 }
 
 void UpdateGame(GameState& game, float deltaTime)
@@ -140,6 +211,14 @@ void UpdateGame(GameState& game, float deltaTime)
         if (IsMenuBackKeyPressed())
         {
             game.shouldQuit = true;
+        }
+        else if (IsTitlePreviousLevelKeyPressed())
+        {
+            world::CycleCurrentLevel(-1);
+        }
+        else if (IsTitleNextLevelKeyPressed())
+        {
+            world::CycleCurrentLevel(1);
         }
         else if (IsTitleStartKeyPressed())
         {
@@ -199,6 +278,20 @@ void UpdateGame(GameState& game, float deltaTime)
         return;
     }
 
+    if (game.phase == GamePhase::Victory)
+    {
+        if (IsRestartKeyPressed())
+        {
+            StartGameplay(game);
+        }
+        else if (IsMenuBackKeyPressed())
+        {
+            ReturnToTitle(game);
+        }
+
+        return;
+    }
+
     if (IsGameplayPauseKeyPressed())
     {
         OpenQuickPause(game);
@@ -218,8 +311,11 @@ void UpdateGame(GameState& game, float deltaTime)
 
     game.survivalTime += deltaTime;
     game.bestSurvivalTime = std::max(game.bestSurvivalTime, game.survivalTime);
-    game.difficultyLevel = tuning::CalculateDifficultyLevel(game.survivalTime);
+    game.difficultyLevel = std::max(
+        tuning::CalculateDifficultyLevel(game.survivalTime),
+        tuning::GetStageDifficultyFloor(game.currentScoreStage));
     game.pickupMessageTimer = std::max(0.0f, game.pickupMessageTimer - deltaTime);
+    game.stageAdvanceTimer = std::max(0.0f, game.stageAdvanceTimer - deltaTime);
     if (game.pickupMessageTimer <= 0.0f)
     {
         game.pickupMessage = nullptr;
@@ -244,24 +340,30 @@ void UpdateGame(GameState& game, float deltaTime)
         PlayShootSound(game.audio);
     }
 
-    const int destroyedBeforeShot = game.destroyedCount;
-    if (firedShot &&
+    const entities::TargetHitResult hitResult = firedShot ?
         entities::TryHitTargets(
             game.player,
             game.targets,
             game.hitCount,
             game.destroyedCount,
-            game.difficultyLevel))
+            game.difficultyLevel) :
+        entities::TargetHitResult{};
+    if (hitResult.hit)
     {
         PlayHitSound(game.audio);
         game.weapon.hitMarker = tuning::kWeapon.hitMarkerStrength;
 
-        const int eliminatedThisShot = game.destroyedCount - destroyedBeforeShot;
-        if (eliminatedThisShot > 0)
+        if (hitResult.scoreDelta > 0)
         {
-            game.score += eliminatedThisShot * tuning::kScoring.scorePerElimination;
+            game.score += hitResult.scoreDelta;
             game.bestScore = std::max(game.bestScore, game.score);
+            TryAdvanceProgression(game);
         }
+    }
+
+    if (game.phase != GamePhase::Gameplay)
+    {
+        return;
     }
 
     entities::TryDamagePlayerFromTargets(game.player, game.targets);
@@ -274,10 +376,16 @@ void UpdateGame(GameState& game, float deltaTime)
         {
             game.score += pickupResult.scoreDelta;
             game.bestScore = std::max(game.bestScore, game.score);
+            TryAdvanceProgression(game);
         }
 
         game.pickupMessage = entities::GetPickupLabel(pickupResult.type);
         game.pickupMessageTimer = tuning::kPickup.feedbackDuration;
+    }
+
+    if (game.phase != GamePhase::Gameplay)
+    {
+        return;
     }
 
     if (game.player.health < playerHealthBeforeDamage)
@@ -307,6 +415,10 @@ void DrawGame(GameState& game)
             game.player,
             game.weapon,
             game.difficultyLevel,
+            game.currentScoreStage,
+            tuning::kRun.totalScoreStages,
+            tuning::GetScoreStageTarget(std::min(game.currentScoreStage, tuning::kRun.totalScoreStages)),
+            (game.phase == GamePhase::Victory) ? 0 : std::max(0, tuning::GetScoreStageTarget(game.currentScoreStage) - game.score),
             game.score,
             game.bestScore,
             game.hitCount,
@@ -316,17 +428,31 @@ void DrawGame(GameState& game)
             game.bestSurvivalTime,
             game.pickupMessage,
             game.pickupMessageTimer,
-            game.phase == GamePhase::GameOver);
+            game.stageAdvanceTimer,
+            game.phase == GamePhase::GameOver,
+            game.phase == GamePhase::Victory);
     }
     EndMode2D();
 
     if (game.phase == GamePhase::Title)
     {
-        render::DrawTitleOverlay();
+        render::DrawTitleOverlay(
+            world::GetCurrentLevelDisplayName(),
+            world::GetCurrentLevelIndex(),
+            world::GetLevelCount());
     }
     else if (game.phase == GamePhase::Pause)
     {
         render::DrawPauseOverlay(game.pauseMode, game.pauseMenuSelection);
+    }
+    else if (game.phase == GamePhase::Victory)
+    {
+        render::DrawVictoryOverlay(
+            game.score,
+            game.bestScore,
+            game.survivalTime,
+            game.bestSurvivalTime,
+            tuning::kRun.totalScoreStages);
     }
 }
 } // namespace core

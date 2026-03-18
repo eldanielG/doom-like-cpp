@@ -51,6 +51,112 @@ float Clamp01(float value)
     return std::clamp(value, 0.0f, 1.0f);
 }
 
+struct BillboardVisibleSpan
+{
+    int startX;
+    int endX;
+};
+
+Vector2 GetGameplayShakeOffset(const entities::Player& player)
+{
+    const float shake = Clamp01(player.screenShake);
+    const float time = static_cast<float>(GetTime());
+    return Vector2{
+        std::sin(time * 72.0f) * 7.0f * shake,
+        std::cos(time * 93.0f) * 4.0f * shake,
+    };
+}
+
+std::vector<BillboardVisibleSpan> CollectBillboardVisibleSpans(
+    float screenCenterX,
+    float halfWidth,
+    float depth,
+    const std::vector<float>& depthBuffer)
+{
+    std::vector<BillboardVisibleSpan> spans;
+    const int left = std::max(0, static_cast<int>(std::floor(screenCenterX - halfWidth)));
+    const int right = std::min(render::kScreenWidth - 1, static_cast<int>(std::ceil(screenCenterX + halfWidth)));
+
+    if (left > right)
+    {
+        return spans;
+    }
+
+    bool spanOpen = false;
+    int spanStart = left;
+
+    for (int column = left; column <= right; ++column)
+    {
+        const bool isVisible = depth < depthBuffer[static_cast<std::size_t>(column)];
+
+        if (isVisible && !spanOpen)
+        {
+            spanOpen = true;
+            spanStart = column;
+        }
+        else if (!isVisible && spanOpen)
+        {
+            spans.push_back(BillboardVisibleSpan{spanStart, column - 1});
+            spanOpen = false;
+        }
+    }
+
+    if (spanOpen)
+    {
+        spans.push_back(BillboardVisibleSpan{spanStart, right});
+    }
+
+    return spans;
+}
+
+template <typename DrawFn>
+void DrawBillboardClipped(
+    const entities::Player& player,
+    float screenCenterX,
+    float screenCenterY,
+    float halfWidth,
+    float halfHeight,
+    float depth,
+    const std::vector<float>& depthBuffer,
+    DrawFn&& drawFn)
+{
+    const std::vector<BillboardVisibleSpan> visibleSpans =
+        CollectBillboardVisibleSpans(screenCenterX, halfWidth, depth, depthBuffer);
+
+    if (visibleSpans.empty())
+    {
+        return;
+    }
+
+    const Vector2 shakeOffset = GetGameplayShakeOffset(player);
+    const int clipTop = std::max(0, static_cast<int>(std::floor(screenCenterY - halfHeight + shakeOffset.y)));
+    const int clipBottom = std::min(
+        render::kScreenHeight,
+        static_cast<int>(std::ceil(screenCenterY + halfHeight + shakeOffset.y)));
+
+    if (clipBottom <= clipTop)
+    {
+        return;
+    }
+
+    for (const BillboardVisibleSpan& span : visibleSpans)
+    {
+        const int clipLeft = std::max(0, static_cast<int>(std::floor(static_cast<float>(span.startX) + shakeOffset.x)));
+        const int clipRight = std::min(
+            render::kScreenWidth,
+            static_cast<int>(std::ceil(static_cast<float>(span.endX + 1) + shakeOffset.x)));
+
+        if (clipRight <= clipLeft)
+        {
+            continue;
+        }
+
+        BeginScissorMode(clipLeft, clipTop, clipRight - clipLeft, clipBottom - clipTop);
+        drawFn();
+        EndScissorMode();
+    }
+}
+
 struct TargetVisualStyle
 {
     Color bodyColor;
@@ -249,43 +355,32 @@ void DrawTarget(
         target.position.y - player.position.y,
     };
     const float distanceSquared = LengthSquared(toTarget);
-
-    if (distanceSquared <= 0.0001f)
-    {
-        return;
-    }
-
-    const float targetDistance = std::sqrt(distanceSquared);
-    const float angleDifference = NormalizeRelativeAngle(std::atan2(toTarget.y, toTarget.x) - player.angle);
+    const bool overlappingPlayer = distanceSquared <= 0.0001f;
+    const float targetDistance = overlappingPlayer ? 0.001f : std::sqrt(distanceSquared);
+    const float angleDifference = overlappingPlayer ?
+        0.0f :
+        NormalizeRelativeAngle(std::atan2(toTarget.y, toTarget.x) - player.angle);
     const float halfFov = player.fov * 0.5f;
+    const float angularRadius = std::atan2(target.size * 0.6f, std::max(targetDistance, 0.001f));
 
-    if (std::fabs(angleDifference) > (halfFov + 0.2f))
+    if (std::fabs(angleDifference) > (halfFov + angularRadius))
     {
         return;
     }
 
-    const float perpendicularDistance = targetDistance * std::cos(angleDifference);
-
-    if (perpendicularDistance <= 0.05f)
-    {
-        return;
-    }
+    const float perpendicularDistance = std::max(0.12f, targetDistance * std::cos(angleDifference));
 
     const float screenOffset = std::tan(angleDifference) / std::tan(halfFov);
-    const int screenX = static_cast<int>(((screenOffset + 1.0f) * 0.5f) * static_cast<float>(render::kScreenWidth));
-
-    if (screenX < 0 || screenX >= render::kScreenWidth || perpendicularDistance >= depthBuffer[screenX])
-    {
-        return;
-    }
+    const float screenCenterX = ((screenOffset + 1.0f) * 0.5f) * static_cast<float>(render::kScreenWidth);
 
     int spriteSize = static_cast<int>((static_cast<float>(render::kScreenHeight) * target.size) / perpendicularDistance);
-    spriteSize = std::clamp(spriteSize, 18, 280);
+    spriteSize = std::clamp(spriteSize, 18, 420);
 
     const int centerY = render::kScreenHeight / 2;
     const float outerRadius = static_cast<float>(spriteSize) * 0.5f;
     const float middleRadius = outerRadius * 0.62f;
     const float innerRadius = outerRadius * 0.24f;
+    const int screenX = static_cast<int>(std::round(screenCenterX));
 
     if (target.destroyed)
     {
@@ -301,14 +396,18 @@ void DrawTarget(
         const Color burstColor = {255, 164, 104, alpha};
         const Color emberColor = {255, 222, 178, alpha};
         const Color shockColor = {255, 210, 156, static_cast<unsigned char>(180.0f * killPulse)};
+        const float clipHalfWidth = shockRadius + burstSpread + 8.0f;
+        const float clipHalfHeight = shockRadius + burstSpread + 8.0f;
 
-        DrawCircle(screenX, centerY, outerRadius * 0.24f, emberColor);
-        DrawCircle(screenX - static_cast<int>(burstSpread), centerY - static_cast<int>(burstSpread * 0.15f), outerRadius * 0.16f, burstColor);
-        DrawCircle(screenX + static_cast<int>(burstSpread), centerY, outerRadius * 0.18f, burstColor);
-        DrawCircle(screenX, centerY - static_cast<int>(burstSpread * 0.75f), outerRadius * 0.14f, emberColor);
-        DrawCircleLines(screenX, centerY, shockRadius, shockColor);
-        DrawLine(screenX - static_cast<int>(outerRadius * 0.7f), centerY, screenX + static_cast<int>(outerRadius * 0.7f), centerY, burstColor);
-        DrawLine(screenX, centerY - static_cast<int>(outerRadius * 0.8f), screenX, centerY + static_cast<int>(outerRadius * 0.8f), burstColor);
+        DrawBillboardClipped(player, screenCenterX, static_cast<float>(centerY), clipHalfWidth, clipHalfHeight, perpendicularDistance, depthBuffer, [&]() {
+            DrawCircle(screenX, centerY, outerRadius * 0.24f, emberColor);
+            DrawCircle(screenX - static_cast<int>(burstSpread), centerY - static_cast<int>(burstSpread * 0.15f), outerRadius * 0.16f, burstColor);
+            DrawCircle(screenX + static_cast<int>(burstSpread), centerY, outerRadius * 0.18f, burstColor);
+            DrawCircle(screenX, centerY - static_cast<int>(burstSpread * 0.75f), outerRadius * 0.14f, emberColor);
+            DrawCircleLines(screenX, centerY, shockRadius, shockColor);
+            DrawLine(screenX - static_cast<int>(outerRadius * 0.7f), centerY, screenX + static_cast<int>(outerRadius * 0.7f), centerY, burstColor);
+            DrawLine(screenX, centerY - static_cast<int>(outerRadius * 0.8f), screenX, centerY + static_cast<int>(outerRadius * 0.8f), burstColor);
+        });
         return;
     }
 
@@ -319,24 +418,28 @@ void DrawTarget(
     const Color respawnBaseColor = LerpColor(Color{168, 214, 255, 255}, style.bodyColor, 1.0f - target.respawnFlash);
     const Color boardColor = LerpColor(respawnBaseColor, Color{255, 132, 96, 255}, target.hitFlash);
     const Color ringColor = LerpColor(style.ringColor, Color{255, 220, 170, 255}, target.hitFlash);
+    const float clipHalfWidth = outerRadius * 1.35f;
+    const float clipHalfHeight = static_cast<float>(spriteSize);
 
-    DrawEllipse(screenX, liftedCenterY, outerRadius * reactionScale, outerRadius * reactionSquash, boardColor);
-    DrawEllipse(screenX, liftedCenterY, middleRadius * reactionScale, middleRadius * reactionSquash, ringColor);
-    DrawEllipse(screenX, liftedCenterY, innerRadius * reactionScale, innerRadius * reactionSquash, style.coreColor);
-    DrawRectangle(screenX - (spriteSize / 16), liftedCenterY + (spriteSize / 2), spriteSize / 8, spriteSize / 2, Color{88, 66, 48, 255});
-    DrawCircleLines(screenX, liftedCenterY, outerRadius * (1.02f + (target.hitFlash * 0.06f)), Color{255, 234, 198, 140});
+    DrawBillboardClipped(player, screenCenterX, static_cast<float>(liftedCenterY), clipHalfWidth, clipHalfHeight, perpendicularDistance, depthBuffer, [&]() {
+        DrawEllipse(screenX, liftedCenterY, outerRadius * reactionScale, outerRadius * reactionSquash, boardColor);
+        DrawEllipse(screenX, liftedCenterY, middleRadius * reactionScale, middleRadius * reactionSquash, ringColor);
+        DrawEllipse(screenX, liftedCenterY, innerRadius * reactionScale, innerRadius * reactionSquash, style.coreColor);
+        DrawRectangle(screenX - (spriteSize / 16), liftedCenterY + (spriteSize / 2), spriteSize / 8, spriteSize / 2, Color{88, 66, 48, 255});
+        DrawCircleLines(screenX, liftedCenterY, outerRadius * (1.02f + (target.hitFlash * 0.06f)), Color{255, 234, 198, 140});
 
-    if (target.respawnFlash > 0.0f)
-    {
-        const Color respawnRingColor = {170, 224, 255, static_cast<unsigned char>(170.0f * target.respawnFlash)};
-        DrawCircleLines(screenX, liftedCenterY, outerRadius * (1.18f + ((1.0f - target.respawnFlash) * 0.2f)), respawnRingColor);
-    }
+        if (target.respawnFlash > 0.0f)
+        {
+            const Color respawnRingColor = {170, 224, 255, static_cast<unsigned char>(170.0f * target.respawnFlash)};
+            DrawCircleLines(screenX, liftedCenterY, outerRadius * (1.18f + ((1.0f - target.respawnFlash) * 0.2f)), respawnRingColor);
+        }
 
-    if (target.attackFlash > 0.0f)
-    {
-        const Color attackRingColor = {255, 192, 118, static_cast<unsigned char>(170.0f * target.attackFlash)};
-        DrawCircleLines(screenX, liftedCenterY, outerRadius * (1.22f + ((1.0f - target.attackFlash) * 0.08f)), attackRingColor);
-    }
+        if (target.attackFlash > 0.0f)
+        {
+            const Color attackRingColor = {255, 192, 118, static_cast<unsigned char>(170.0f * target.attackFlash)};
+            DrawCircleLines(screenX, liftedCenterY, outerRadius * (1.22f + ((1.0f - target.attackFlash) * 0.08f)), attackRingColor);
+        }
+    });
 }
 
 void DrawProjectile(
@@ -864,6 +967,10 @@ void DrawHud(
     const entities::Player& player,
     const entities::WeaponState& weapon,
     int difficultyLevel,
+    int currentScoreStage,
+    int totalScoreStages,
+    int currentStageTargetScore,
+    int scoreToNextStage,
     int score,
     int bestScore,
     int hitCount,
@@ -873,10 +980,12 @@ void DrawHud(
     float bestSurvivalTime,
     const char* pickupMessage,
     float pickupMessageTimer,
-    bool isGameOver)
+    float stageAdvanceTimer,
+    bool isGameOver,
+    bool isVictory)
 {
     constexpr int kHudWidth = 248;
-    constexpr int kHudHeight = 224;
+    constexpr int kHudHeight = 248;
     constexpr int kHudPadding = 16;
 
     const int hudX = kScreenWidth - kHudWidth - kHudPadding;
@@ -904,18 +1013,30 @@ void DrawHud(
         static_cast<float>(player.health) / static_cast<float>(core::tuning::kPlayer.maxHealth),
         0.0f,
         1.0f);
+    const bool isLowHealth = player.health <= core::tuning::kPlayer.lowHealthWarningThreshold;
+    const float lowHealthPulse = isLowHealth ?
+        (0.55f + (0.45f * std::sin(static_cast<float>(GetTime()) * core::tuning::kPlayer.lowHealthPulseSpeed))) :
+        0.0f;
     const Color healthColor = LerpColor(Color{196, 62, 62, 255}, Color{114, 214, 132, 255}, healthRatio);
-    DrawText(TextFormat("HP %03i / %03i", player.health, core::tuning::kPlayer.maxHealth), hudX + 12, hudY + 56, 18, primaryTextColor);
+    const Color healthTextColor = isLowHealth ?
+        LerpColor(Color{255, 196, 164, 255}, Color{255, 92, 92, 255}, lowHealthPulse) :
+        primaryTextColor;
+    DrawText(TextFormat("HP %03i / %03i", player.health, core::tuning::kPlayer.maxHealth), hudX + 12, hudY + 56, 18, healthTextColor);
     DrawRectangle(hudX + 12, hudY + 80, kHudWidth - 24, 10, Color{34, 18, 20, 255});
     DrawRectangle(hudX + 13, hudY + 81, static_cast<int>(static_cast<float>(kHudWidth - 26) * healthRatio), 8, healthColor);
     DrawText(TextFormat("SCORE %04i | BEST %04i", score, bestScore), hudX + 12, hudY + 96, 18, secondaryTextColor);
-    DrawText(TextFormat("TIME %02i:%02i.%01i", currentMinutes, currentSeconds, currentTenths), hudX + 12, hudY + 116, 18, secondaryTextColor);
-    DrawText(TextFormat("BEST %02i:%02i.%01i", bestMinutes, bestSeconds, bestTenths), hudX + 12, hudY + 136, 18, secondaryTextColor);
-    DrawText(TextFormat("INTENSITY LVL %02i", difficultyLevel), hudX + 12, hudY + 156, 18, secondaryTextColor);
-    DrawText(TextFormat("HITS %02i | ELIMS %02i | ALIVE %02i", hitCount, destroyedCount, aliveCount), hudX + 12, hudY + 176, 18, secondaryTextColor);
+    DrawText(TextFormat("STAGE %02i / %02i | GOAL %04i", std::min(currentScoreStage, totalScoreStages), totalScoreStages, currentStageTargetScore), hudX + 12, hudY + 116, 18, secondaryTextColor);
+    DrawText(isVictory ? "RUN CLEAR | TARGETS COMPLETE" : TextFormat("NEXT STAGE IN %03i", scoreToNextStage), hudX + 12, hudY + 136, 18, secondaryTextColor);
+    DrawText(TextFormat("TIME %02i:%02i.%01i | BEST %02i:%02i.%01i", currentMinutes, currentSeconds, currentTenths, bestMinutes, bestSeconds, bestTenths), hudX + 12, hudY + 156, 18, secondaryTextColor);
+    DrawText(TextFormat("INTENSITY LVL %02i", difficultyLevel), hudX + 12, hudY + 176, 18, secondaryTextColor);
+    DrawText(TextFormat("HITS %02i | ELIMS %02i | ALIVE %02i", hitCount, destroyedCount, aliveCount), hudX + 12, hudY + 196, 18, secondaryTextColor);
     if (weapon.rapidFireTimer > 0.0f)
     {
-        DrawText(TextFormat("RAPID FIRE %.1fs", weapon.rapidFireTimer), hudX + 12, hudY + 196, 18, Color{116, 214, 255, 255});
+        DrawText(TextFormat("RAPID FIRE %.1fs", weapon.rapidFireTimer), hudX + 12, hudY + 216, 18, Color{116, 214, 255, 255});
+    }
+    else if (isLowHealth)
+    {
+        DrawText("LOW HEALTH", hudX + 12, hudY + 216, 18, Color{255, static_cast<unsigned char>(120.0f + (110.0f * lowHealthPulse)), 120, 255});
     }
 
     if (player.damageFlash > 0.0f)
@@ -925,21 +1046,53 @@ void DrawHud(
         DrawRectangle(-kOverlayOverscan, -kOverlayOverscan, kScreenWidth + (kOverlayOverscan * 2), kScreenHeight + (kOverlayOverscan * 2), damageOverlay);
     }
 
+    if (isLowHealth)
+    {
+        const Color warningBorder = {
+            180,
+            28,
+            28,
+            static_cast<unsigned char>(35.0f + (55.0f * lowHealthPulse)),
+        };
+        DrawRectangle(0, 0, kScreenWidth, 8, warningBorder);
+        DrawRectangle(0, kScreenHeight - 8, kScreenWidth, 8, warningBorder);
+        DrawRectangle(0, 0, 8, kScreenHeight, warningBorder);
+        DrawRectangle(kScreenWidth - 8, 0, 8, kScreenHeight, warningBorder);
+    }
+
     const char* controlsText = isGameOver ?
         "Game over | R/Enter/Space restart | Esc title" :
-        "WASD move | arrows turn | mouse1/space fire | P toggle pause | Esc pause menu | R reset";
+        (isVictory ?
+            "Run clear | R/Enter/Space restart | Esc title" :
+            "WASD move | arrows turn | hold mouse1/space fire | P pause | Esc menu | R reset");
     DrawText(controlsText, 16, kScreenHeight - 28, 18, Color{220, 220, 220, 190});
 
     const int crosshairX = kScreenWidth / 2;
     const int crosshairY = kScreenHeight / 2;
     const float hitPulse = Clamp01(weapon.hitMarker);
-    const int crosshairGap = 3 + static_cast<int>(hitPulse * 2.0f);
+    const float recoilPulse = Clamp01(weapon.recoil / core::tuning::kWeapon.fireRecoil);
+    const float cooldownDuration = core::tuning::kWeapon.cooldown *
+        ((weapon.rapidFireTimer > 0.0f) ? core::tuning::kPickup.rapidFireCooldownMultiplier : 1.0f);
+    const float cooldownPulse = Clamp01(weapon.shotCooldown / std::max(0.001f, cooldownDuration));
+    const int crosshairGap = 4 + static_cast<int>((hitPulse * 2.0f) + (recoilPulse * 5.0f) + (cooldownPulse * 3.0f));
     const int crosshairArm = 6 + static_cast<int>(hitPulse * 6.0f);
-    const Color crosshairColor = LerpColor(Color{240, 236, 220, 180}, Color{255, 158, 120, 255}, hitPulse);
+    Color crosshairColor = LerpColor(Color{236, 232, 224, 180}, Color{255, 174, 128, 255}, hitPulse);
+    crosshairColor = LerpColor(crosshairColor, Color{255, 214, 116, 255}, cooldownPulse * 0.45f);
     DrawLine(crosshairX - (crosshairGap + crosshairArm), crosshairY, crosshairX - crosshairGap, crosshairY, crosshairColor);
     DrawLine(crosshairX + crosshairGap, crosshairY, crosshairX + crosshairGap + crosshairArm, crosshairY, crosshairColor);
     DrawLine(crosshairX, crosshairY - (crosshairGap + crosshairArm), crosshairX, crosshairY - crosshairGap, crosshairColor);
     DrawLine(crosshairX, crosshairY + crosshairGap, crosshairX, crosshairY + crosshairGap + crosshairArm, crosshairColor);
+    DrawCircle(crosshairX, crosshairY, 1.5f + (recoilPulse * 0.75f), Color{255, 244, 220, static_cast<unsigned char>(140.0f + (90.0f * cooldownPulse))});
+
+    if (cooldownPulse > 0.0f)
+    {
+        const float cooldownRingRadius = 7.0f + (cooldownPulse * 8.0f);
+        DrawCircleLines(
+            crosshairX,
+            crosshairY,
+            cooldownRingRadius,
+            Color{255, 210, 148, static_cast<unsigned char>(60.0f + (90.0f * cooldownPulse))});
+    }
 
     if (weapon.hitMarker > 0.0f)
     {
@@ -973,6 +1126,18 @@ void DrawHud(
         DrawText("Press R, Enter or Space | Esc title", boxX + 20, boxY + 126, 22, Color{220, 214, 206, 255});
     }
 
+    if (!isGameOver && !isVictory && stageAdvanceTimer > 0.0f)
+    {
+        const float pulse = Clamp01(stageAdvanceTimer / core::tuning::kRun.stageAdvanceFeedbackDuration);
+        const int bannerWidth = 320;
+        const int bannerHeight = 54;
+        const int bannerX = (kScreenWidth - bannerWidth) / 2;
+        const int bannerY = 36;
+        DrawRectangle(bannerX, bannerY, bannerWidth, bannerHeight, Color{12, 14, 20, static_cast<unsigned char>(150.0f * pulse)});
+        DrawRectangleLines(bannerX, bannerY, bannerWidth, bannerHeight, Color{255, 204, 138, static_cast<unsigned char>(220.0f * pulse)});
+        DrawText(TextFormat("STAGE %02i TARGET %04i", currentScoreStage, currentStageTargetScore), bannerX + 28, bannerY + 16, 24, Color{255, 226, 176, static_cast<unsigned char>(255.0f * pulse)});
+    }
+
     if (pickupMessage != nullptr && pickupMessageTimer > 0.0f)
     {
         const float pulse = Clamp01(pickupMessageTimer / core::tuning::kPickup.feedbackDuration);
@@ -984,16 +1149,19 @@ void DrawHud(
     }
 }
 
-void DrawTitleOverlay()
+void DrawTitleOverlay(const char* levelName, int levelIndex, int levelCount)
 {
     DrawRectangle(0, 0, kScreenWidth, kScreenHeight, Color{8, 10, 16, 165});
-    DrawRectangle((kScreenWidth / 2) - 260, (kScreenHeight / 2) - 122, 520, 244, Color{12, 14, 20, 220});
-    DrawRectangleLines((kScreenWidth / 2) - 260, (kScreenHeight / 2) - 122, 520, 244, Color{118, 124, 138, 230});
+    DrawRectangle((kScreenWidth / 2) - 288, (kScreenHeight / 2) - 162, 576, 324, Color{12, 14, 20, 220});
+    DrawRectangleLines((kScreenWidth / 2) - 288, (kScreenHeight / 2) - 162, 576, 324, Color{118, 124, 138, 230});
     DrawCenteredText("DOOM-LIKE CPP", (kScreenHeight / 2) - 74, 42, Color{238, 232, 220, 255});
     DrawCenteredText("Retro FPS Prototype in C++ and raylib", (kScreenHeight / 2) - 18, 22, Color{190, 198, 210, 255});
-    DrawCenteredText("Press any key to start", (kScreenHeight / 2) + 38, 24, Color{255, 194, 128, 255});
-    DrawCenteredText("WASD move  |  Arrows turn  |  Mouse1 / Space fire", (kScreenHeight / 2) + 78, 20, Color{214, 214, 214, 220});
-    DrawCenteredText("Esc quits from title", (kScreenHeight / 2) + 108, 18, Color{202, 208, 218, 220});
+    DrawCenteredText("Press Enter, Space or Mouse1 to start", (kScreenHeight / 2) + 28, 24, Color{255, 194, 128, 255});
+    DrawCenteredText("Clear 5 score stages to finish the run", (kScreenHeight / 2) + 66, 21, Color{255, 204, 138, 235});
+    DrawCenteredText(TextFormat("Arena %i/%i: %s", levelIndex + 1, levelCount, levelName), (kScreenHeight / 2) + 94, 20, Color{238, 232, 220, 255});
+    DrawCenteredText("A/D or Left/Right choose arena", (kScreenHeight / 2) + 120, 18, Color{202, 208, 218, 220});
+    DrawCenteredText("WASD move  |  Arrows turn  |  Hold Mouse1 / Space fire", (kScreenHeight / 2) + 146, 20, Color{214, 214, 214, 220});
+    DrawCenteredText("Esc quits from title", (kScreenHeight / 2) + 174, 18, Color{202, 208, 218, 220});
 }
 
 void DrawPauseOverlay(core::PauseMode pauseMode, int selectedOption)
@@ -1043,5 +1211,38 @@ void DrawPauseOverlay(core::PauseMode pauseMode, int selectedOption)
 
     DrawCenteredText("Up/Down or W/S navigate", panelY + 226, 18, Color{202, 208, 218, 220});
     DrawCenteredText("Enter/Space confirm | Esc or P resume", panelY + 248, 18, Color{202, 208, 218, 220});
+}
+
+void DrawVictoryOverlay(int score, int bestScore, float survivalTime, float bestSurvivalTime, int totalScoreStages)
+{
+    int currentMinutes = 0;
+    int currentSeconds = 0;
+    int currentTenths = 0;
+    int bestMinutes = 0;
+    int bestSeconds = 0;
+    int bestTenths = 0;
+
+    BreakTime(survivalTime, currentMinutes, currentSeconds, currentTenths);
+    BreakTime(bestSurvivalTime, bestMinutes, bestSeconds, bestTenths);
+
+    constexpr int kVictoryWidth = 430;
+    constexpr int kVictoryHeight = 184;
+    const int boxX = (kScreenWidth - kVictoryWidth) / 2;
+    const int boxY = (kScreenHeight - kVictoryHeight) / 2;
+
+    DrawRectangle(0, 0, kScreenWidth, kScreenHeight, Color{8, 10, 16, 96});
+    DrawRectangle(boxX, boxY, kVictoryWidth, kVictoryHeight, Color{12, 14, 20, 230});
+    DrawRectangleLines(boxX, boxY, kVictoryWidth, kVictoryHeight, Color{255, 206, 132, 235});
+    DrawText("RUN CLEAR", boxX + 118, boxY + 18, 36, Color{255, 236, 198, 255});
+    DrawText(TextFormat("Completed %i score stages", totalScoreStages), boxX + 96, boxY + 58, 22, Color{220, 214, 206, 255});
+    DrawText(TextFormat("Score %04i | Best %04i", score, bestScore), boxX + 86, boxY + 90, 22, Color{220, 214, 206, 255});
+    DrawText(TextFormat("Time %02i:%02i.%01i | Best %02i:%02i.%01i",
+        currentMinutes,
+        currentSeconds,
+        currentTenths,
+        bestMinutes,
+        bestSeconds,
+        bestTenths), boxX + 42, boxY + 120, 22, Color{220, 214, 206, 255});
+    DrawText("Press R, Enter or Space | Esc title", boxX + 42, boxY + 150, 22, Color{220, 214, 206, 255});
 }
 } // namespace render
